@@ -65,13 +65,28 @@ def _draw_text(c: canvas.Canvas, text: str, x: float, y: float, size: int, color
     return y - size - 7
 
 
-def _pill(c: canvas.Canvas, x: float, y: float, w: float, h: float, label: str, fill: str, stroke: str, text: str) -> None:
-    c.setStrokeColor(colors.HexColor(stroke))
-    c.setFillColor(colors.HexColor(fill))
-    c.roundRect(x, y, w, h, 12, stroke=1, fill=1)
-    c.setFillColor(colors.HexColor(text))
-    c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(x + w / 2, y + h / 2 - 3, label)
+def _draw_signature_mark(c: canvas.Canvas, name: str, x: float, y: float) -> None:
+    c.saveState()
+    c.setStrokeColor(colors.HexColor("#0f172a"))
+    c.setLineWidth(1.7)
+    cursor = x
+    for index, char in enumerate(name[:24]):
+        if char == " ":
+            cursor += 9
+            continue
+        height = 9 + (ord(char) % 11)
+        width = 7 + (ord(char) % 6)
+        baseline = y + ((index % 3) - 1) * 1.6
+        path = c.beginPath()
+        path.moveTo(cursor, baseline)
+        path.curveTo(cursor + width * 0.25, baseline + height, cursor + width * 0.7, baseline - height * 0.35, cursor + width, baseline + height * 0.25)
+        c.drawPath(path, stroke=1, fill=0)
+        cursor += width * 0.82
+    path = c.beginPath()
+    path.moveTo(x - 4, y - 5)
+    path.curveTo(x + 52, y - 13, x + 138, y - 10, x + 204, y - 2)
+    c.drawPath(path, stroke=1, fill=0)
+    c.restoreState()
 
 
 def _draw_grid(c: canvas.Canvas, width: float, height: float) -> None:
@@ -150,8 +165,6 @@ def build_certificate_pdf(context: CertificateContext) -> bytes:
         c.roundRect(page_width - margin - 112, page_height - margin - 82, 74, 62, 14, stroke=0, fill=1)
         c.drawImage(club_logo, page_width - margin - 103, page_height - margin - 74, width=56, height=46, preserveAspectRatio=True, mask="auto")
 
-    _pill(c, page_width - margin - 230, page_height - margin - 50, 102, 24, "PPE COMPLETE", "#ecfdf3", "#86efac", "#166534")
-    _pill(c, page_width - margin - 118, page_height - margin - 50, 78, 24, "VERIFIED", "#eff6ff", "#93c5fd", "#1d4ed8")
 
     title_y = page_height - 150
     c.setFillColor(colors.HexColor("#0f172a"))
@@ -209,12 +222,13 @@ def build_certificate_pdf(context: CertificateContext) -> bytes:
     c.setStrokeColor(colors.HexColor("#0f172a"))
     c.setLineWidth(0.8)
     c.line(margin + 58, sign_y, margin + 260, sign_y)
-    c.setFont("Helvetica-Oblique", 18)
-    c.setFillColor(colors.HexColor("#0f172a"))
-    c.drawString(margin + 68, sign_y + 12, context.clinician_signature)
+    _draw_signature_mark(c, context.clinician_signature, margin + 66, sign_y + 17)
     c.setFont("Helvetica-Bold", 9)
     c.setFillColor(colors.HexColor("#64748b"))
     c.drawString(margin + 58, sign_y - 16, "SIGNING CLINICIAN")
+    c.setFont("Helvetica", 10)
+    c.setFillColor(colors.HexColor("#0f172a"))
+    c.drawString(margin + 58, sign_y - 31, context.clinician_signature)
 
     qr_code = qr.QrCodeWidget(context.verification_url)
     drawing = Drawing(78, 78, transform=[78.0 / qr_code.getBounds()[2], 0, 0, 78.0 / qr_code.getBounds()[3], 0, 0])
