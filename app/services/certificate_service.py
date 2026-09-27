@@ -17,7 +17,7 @@ from app.core.config import get_settings
 from app.models.auth import User
 from app.models.ppe import PPEAssessment
 
-DEFAULT_LOGO_URL = "https://res.cloudinary.com/dfyqn0c1t/image/upload/v1790409238/safe-logo_ajheqi.png"
+DEFAULT_LOGO_URL = "https://res.cloudinary.com/dfyqn0c1t/image/upload/v1790532798/safesport_1_roaybx.png"
 
 
 @dataclass(frozen=True)

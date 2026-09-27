@@ -395,6 +395,8 @@ def finalize_assessment(assessment_id: uuid.UUID, payload: PPEAssessmentPayload,
     payload.finalized = True
     payload.status = "complete"
     _assessment_from_payload(assessment, payload)
+    if not assessment.signature.strip():
+        assessment.signature = f"{user.first_name} {user.last_name}"
     assessment.finalized = True
     assessment.status = "complete"
     assessment.certificate_code = assessment.certificate_code or f"SAFE-{str(assessment.id)[:8].upper()}"

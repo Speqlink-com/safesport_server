@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     zoho_from_email: str = ""
     zoho_from_name: str = "SafeSport"
     email_delivery_mode: Literal["smtp", "console"] = "smtp"
-    safesport_logo_url: str = "https://res.cloudinary.com/dfyqn0c1t/image/upload/v1790409238/safe-logo_ajheqi.png"
+    safesport_logo_url: str = "https://res.cloudinary.com/dfyqn0c1t/image/upload/v1790532798/safesport_1_roaybx.png"
     uploads_dir: str = "uploads"
     max_logo_bytes: int = 2 * 1024 * 1024
     cloudinary_cloud_name: str = ""
