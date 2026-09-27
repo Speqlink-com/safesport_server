@@ -85,6 +85,49 @@ def _section(c: canvas.Canvas, title: str, y: float) -> float:
     return y - 9 * mm
 
 
+def _ensure_space(c: canvas.Canvas, y: float, section: str | None = None) -> float:
+    if y < 35 * mm:
+        c.showPage()
+        y = _header(c, "SafeSport Full Athlete Report", "continued")
+        if section:
+            y = _section(c, section, y)
+    return y
+
+
+def _payload(assessment: PPEAssessment) -> dict:
+    data = {}
+    data.update(assessment.history_payload or {})
+    data.update(assessment.clinical_payload or {})
+    return data
+
+
+def _dict_rows(c: canvas.Canvas, title: str, values: dict, x: float, y: float, width: float) -> float:
+    if not values:
+        c.setFont("Helvetica", 9); c.setFillColor(colors.HexColor("#64748B")); c.drawString(x, y, f"No {title.lower()} recorded.")
+        return y - 7 * mm
+    c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.HexColor("#0F172A")); c.drawString(x, y, title); y -= 5 * mm
+    for key, value in values.items():
+        y = _ensure_space(c, y, title)
+        if isinstance(value, dict):
+            value = "; ".join(f"{k}: {v}" for k, v in value.items() if v not in (None, ""))
+        c.setFont("Helvetica-Bold", 8); c.setFillColor(colors.HexColor("#334155")); c.drawString(x, y, str(key)[:70])
+        y -= 4 * mm
+        c.setFont("Helvetica", 8); c.setFillColor(colors.HexColor("#475569")); y = _wrap(c, str(value or "—"), x + 3 * mm, y, width - 3 * mm, 10)
+    return y - 2 * mm
+
+
+def _list_rows(c: canvas.Canvas, title: str, values: list, x: float, y: float, width: float) -> float:
+    c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.HexColor("#0F172A")); c.drawString(x, y, title); y -= 5 * mm
+    if not values:
+        c.setFont("Helvetica", 8); c.setFillColor(colors.HexColor("#64748B")); c.drawString(x, y, "None recorded.")
+        return y - 7 * mm
+    for index, value in enumerate(values, 1):
+        y = _ensure_space(c, y, title)
+        text = value if isinstance(value, str) else "; ".join(f"{k}: {v}" for k, v in dict(value).items() if v not in (None, ""))
+        c.setFont("Helvetica", 8); c.setFillColor(colors.HexColor("#475569")); y = _wrap(c, f"{index}. {text}", x, y, width, 10)
+    return y - 2 * mm
+
+
 def build_full_report_pdf(data: AthleteReportData) -> bytes:
     buf = BytesIO(); c = canvas.Canvas(buf, pagesize=A4); w, _ = A4
     y = _header(c, "SafeSport Full Athlete Report", "Confidential health record")
@@ -103,10 +146,27 @@ def build_full_report_pdf(data: AthleteReportData) -> bytes:
     y -= 24 * mm
     y = _section(c, "PPE assessments", y)
     for item in data.assessments:
-        c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.HexColor("#0F172A"))
+        y = _ensure_space(c, y, "PPE assessments")
+        payload = _payload(item)
+        c.setFont("Helvetica-Bold", 10); c.setFillColor(colors.HexColor("#0F172A"))
         c.drawString(20 * mm, y, f"{item.created_at.date()} · {item.status} · {item.decision}")
-        y -= 5 * mm; c.setFont("Helvetica", 9); c.setFillColor(colors.HexColor("#334155"))
-        y = _wrap(c, f"Restrictions: {item.restrictions or 'None'} | Plan: {item.plan or 'None'} | Review: {item.review_date or '—'}", 20 * mm, y, w - 40 * mm)
+        y -= 5 * mm
+        c.setFont("Helvetica", 9); c.setFillColor(colors.HexColor("#334155"))
+        y = _wrap(c, f"Reviewed: {item.reviewed} | History submitted: {item.history_submitted} | Finalized: {item.finalized} | Certificate: {item.certificate_code or '—'}", 20 * mm, y, w - 40 * mm)
+        y = _wrap(c, f"Restrictions: {item.restrictions or 'None'} | Plan: {item.plan or 'None'} | Review date: {item.review_date or '—'}", 20 * mm, y, w - 40 * mm)
+        y = _wrap(c, f"Rationale: {item.rationale or '—'} | Signature: {item.signature or '—'} | Physio: {item.physio_status} {item.physio_note or ''}", 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Health history answers", payload.get("historyAnswers") or payload.get("history") or {}, 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Health follow-up details", payload.get("historyDetails") or payload.get("followups") or {}, 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Clinician resolutions", payload.get("historyResolutions") or {}, 20 * mm, y, w - 40 * mm)
+        y = _list_rows(c, "Injury history", payload.get("injuries") or [], 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Concussion history", payload.get("concussion") or {}, 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Physical exam", payload.get("exam") or {}, 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Exam notes", payload.get("examNotes") or {}, 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Musculoskeletal baseline", payload.get("baseline") or {}, 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Baseline notes", payload.get("baselineNotes") or {}, 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Vitals", payload.get("vitals") or {}, 20 * mm, y, w - 40 * mm)
+        y = _wrap(c, f"Sport-specific notes: {payload.get('sportNotes') or '—'}", 20 * mm, y, w - 40 * mm)
+        y = _dict_rows(c, "Care review", payload.get("careReview") or {}, 20 * mm, y, w - 40 * mm)
     if not data.assessments: c.drawString(20 * mm, y, "No PPE assessments recorded."); y -= 8 * mm
     y = _section(c, "Health, incident, rehabilitation and document records", y)
     for record in data.records:

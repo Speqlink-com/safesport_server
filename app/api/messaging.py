@@ -1,7 +1,7 @@
 import uuid
 from collections import defaultdict
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.api.dependencies import current_user, verify_csrf
 from app.db.session import SessionLocal, get_db
@@ -14,6 +14,7 @@ from app.services.cloudinary_service import upload_message_attachment
 
 router = APIRouter(prefix="/messaging", tags=["messaging"])
 GLOBAL_ROLES = {"clinician", "physiotherapist", "sys-admin"}
+INSTITUTION_LOCAL_ROLES = {"athlete", "guardian", "coach", "institution"}
 connections: dict[str, set[WebSocket]] = defaultdict(set)
 
 
@@ -32,16 +33,26 @@ def _institution_id(user: User, db: Session) -> uuid.UUID | None:
 def _user_response(user: User) -> MessageUser:
     return MessageUser(id=str(user.id), name=_name(user), role=user.role, institution_id=str((user.profile_data or {}).get("organization_id") or (user.profile_data or {}).get("institution_id") or "") or None)
 
-def _allowed_people(user: User, db: Session) -> list[User]:
-    stmt = select(User).where(User.is_active.is_(True), User.id != user.id)
-    users = list(db.scalars(stmt.order_by(User.first_name, User.last_name)).all())
-    if user.role in GLOBAL_ROLES or user.role == "sys-admin": return users
+def _same_institution(user: User, other: User, db: Session) -> bool:
     inst = _institution_id(user, db)
-    def visible(other: User) -> bool:
-        if other.role in GLOBAL_ROLES: return True
-        if not inst and user.role == "institution": return other.role == "athlete" or other.role in {"guardian", "coach", "institution"}
-        return str((other.profile_data or {}).get("organization_id") or (other.profile_data or {}).get("institution_id") or "") == str(inst)
-    return [u for u in users if visible(u)]
+    other_inst = _institution_id(other, db)
+    if inst and other_inst:
+        return inst == other_inst
+    if user.role == "institution" and not inst:
+        # Prototype fallback for institution admin accounts not yet linked to one institution.
+        return other.role in INSTITUTION_LOCAL_ROLES
+    return False
+
+
+def _allowed_people(user: User, db: Session) -> list[User]:
+    users = list(db.scalars(select(User).where(User.is_active.is_(True), User.id != user.id).order_by(User.first_name, User.last_name)).all())
+    if user.role in GLOBAL_ROLES:
+        return users
+    return [
+        other
+        for other in users
+        if other.role in GLOBAL_ROLES or (other.role in INSTITUTION_LOCAL_ROLES and _same_institution(user, other, db))
+    ]
 
 def _is_member(db: Session, conversation_id: uuid.UUID, user_id: uuid.UUID) -> bool:
     return bool(db.scalar(select(ConversationMember.id).where(ConversationMember.conversation_id == conversation_id, ConversationMember.user_id == user_id)))
@@ -63,27 +74,39 @@ def _direct_conversation(db: Session, user: User, recipient: User) -> Conversati
     conv=Conversation(kind="direct", title=f"{_name(user)} / {_name(recipient)}", institution_id=_institution_id(user, db) or _institution_id(recipient, db), created_by_user_id=user.id)
     db.add(conv); db.flush(); db.add_all([ConversationMember(conversation_id=conv.id,user_id=user.id), ConversationMember(conversation_id=conv.id,user_id=recipient.id)]); db.commit(); db.refresh(conv); return conv
 
-def _family_conversation(db: Session, user: User) -> Conversation:
-    inst=_institution_id(user, db)
-    title="Institution family group"
-    conv=db.scalar(select(Conversation).where(Conversation.kind=="institution_group", Conversation.institution_id==inst)) if inst else None
+def _family_conversation(db: Session, user: User) -> Conversation | None:
+    inst = _institution_id(user, db)
+    if not inst and user.role not in {"institution"}:
+        return None
+    title = "Institution family group"
+    conv = db.scalar(select(Conversation).where(Conversation.kind == "institution_group", Conversation.institution_id == inst)) if inst else None
     if not conv:
-        conv=Conversation(kind="institution_group", title=title, institution_id=inst, created_by_user_id=user.id); db.add(conv); db.flush()
-    people=[user]+_allowed_people(user, db)
+        conv = Conversation(kind="institution_group", title=title, institution_id=inst, created_by_user_id=user.id)
+        db.add(conv)
+        db.flush()
+    people = [user] + [person for person in _allowed_people(user, db) if person.role in INSTITUTION_LOCAL_ROLES or person.role in GLOBAL_ROLES]
     for person in people:
-        if not _is_member(db, conv.id, person.id): db.add(ConversationMember(conversation_id=conv.id,user_id=person.id))
-    db.commit(); db.refresh(conv); return conv
+        if not _is_member(db, conv.id, person.id):
+            db.add(ConversationMember(conversation_id=conv.id, user_id=person.id))
+    db.commit()
+    db.refresh(conv)
+    return conv
 
 @router.get("/workspace", response_model=MessagingWorkspaceResponse)
 def workspace(user: User = Depends(current_user), db: Session = Depends(get_db)) -> MessagingWorkspaceResponse:
-    _family_conversation(db, user)
-    convs=list(db.scalars(select(Conversation).join(ConversationMember).where(ConversationMember.user_id==user.id).order_by(Conversation.created_at.desc())).unique().all())
-    return MessagingWorkspaceResponse(current_user=_user_response(user), people=[_user_response(u) for u in _allowed_people(user, db)], conversations=[_conversation_response(c, db) for c in convs])
+    family = _family_conversation(db, user)
+    convs = list(db.scalars(select(Conversation).join(ConversationMember).where(ConversationMember.user_id == user.id).order_by(Conversation.created_at.desc())).unique().all())
+    # Keep one institution group plus direct conversations. Drop stale extra groups from older prototype runs.
+    filtered = [conversation for conversation in convs if conversation.kind == "direct" or (family and conversation.id == family.id)]
+    ordered = ([family] if family else []) + [conversation for conversation in filtered if not family or conversation.id != family.id]
+    return MessagingWorkspaceResponse(current_user=_user_response(user), people=[_user_response(u) for u in _allowed_people(user, db)], conversations=[_conversation_response(c, db) for c in ordered])
 
 @router.post("/conversations/direct/{recipient_id}", response_model=ConversationResponse, dependencies=[Depends(verify_csrf)])
 def start_direct(recipient_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)) -> ConversationResponse:
     recipient=db.get(User, recipient_id)
-    if not recipient or recipient not in _allowed_people(user, db): raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact is not available")
+    allowed_ids = {person.id for person in _allowed_people(user, db)}
+    if not recipient or recipient.id not in allowed_ids:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact is not available")
     return _conversation_response(_direct_conversation(db, user, recipient), db)
 
 @router.post("/messages", response_model=MessageResponse, dependencies=[Depends(verify_csrf)])
