@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v docker >/dev/null 2>&1 && docker compose ps api --status running >/dev/null 2>&1; then
+  exec docker compose exec \
+    -e SYSTEM_ADMIN_EMAIL="${SYSTEM_ADMIN_EMAIL:-}" \
+    -e SYSTEM_ADMIN_FIRST_NAME="${SYSTEM_ADMIN_FIRST_NAME:-}" \
+    -e SYSTEM_ADMIN_LAST_NAME="${SYSTEM_ADMIN_LAST_NAME:-}" \
+    -e SYSTEM_ADMIN_PASSWORD="${SYSTEM_ADMIN_PASSWORD:-}" \
+    api uv run bash scripts/seed "$@"
+else
+  exec uv run bash scripts/seed "$@"
+fi

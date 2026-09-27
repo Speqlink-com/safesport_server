@@ -1,0 +1,27 @@
+[project]
+name = "safesport-server"
+version = "0.1.0"
+description = "SafeSport FastAPI authentication server"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+  "alembic==1.17.0",
+  "email-validator==2.3.0",
+  "fastapi[standard]==0.118.0",
+  "httpx==0.28.1",
+  "psycopg[binary]==3.2.10",
+  "pydantic-settings==2.11.0",
+  "pwdlib[argon2]==0.2.1",
+  "pyjwt==2.10.1",
+  "python-multipart==0.0.20",
+  "sqlalchemy==2.0.44",
+  "uvicorn[standard]==0.37.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.4.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
