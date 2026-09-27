@@ -45,9 +45,9 @@ def _same_institution(user: User, other: User, db: Session) -> bool:
 
 
 def _allowed_people(user: User, db: Session) -> list[User]:
-    users = list(db.scalars(select(User).where(User.is_active.is_(True), User.id != user.id).order_by(User.first_name, User.last_name)).all())
     if user.role in GLOBAL_ROLES:
-        return users
+        return []
+    users = list(db.scalars(select(User).where(User.is_active.is_(True), User.id != user.id).order_by(User.first_name, User.last_name)).all())
     return [
         other
         for other in users
@@ -126,11 +126,8 @@ def workspace(user: User = Depends(current_user), db: Session = Depends(get_db))
     families = _family_conversations(db, user)
     family_ids = {conversation.id for conversation in families}
     convs = list(db.scalars(select(Conversation).join(ConversationMember).where(ConversationMember.user_id == user.id).order_by(Conversation.created_at.desc())).unique().all())
-    direct = [conversation for conversation in convs if conversation.kind == "direct"]
-    if user.role in GLOBAL_ROLES:
-        ordered = families + direct
-    else:
-        ordered = families[:1] + direct
+    direct = [] if user.role in GLOBAL_ROLES else [conversation for conversation in convs if conversation.kind == "direct"]
+    ordered = families + direct if user.role in GLOBAL_ROLES else families[:1] + direct
     seen: set[uuid.UUID] = set()
     unique_ordered = []
     for conversation in ordered:
