@@ -23,6 +23,7 @@ from app.schemas.auth import (
     RegistrationStartRequest,
     ResetPasswordRequest,
     SessionResponse,
+    UpdateMeRequest,
     UserResponse,
 )
 from app.services.auth_service import (
@@ -96,6 +97,26 @@ async def login_resend(request: Request, db: Session = Depends(get_db)) -> Messa
 
 @router.get("/me", response_model=SessionResponse)
 def me(user: User = Depends(current_user)) -> SessionResponse:
+    return SessionResponse(user=UserResponse.model_validate(user))
+
+
+@router.put("/me", response_model=SessionResponse, dependencies=[Depends(verify_csrf)])
+def update_me(
+    payload: UpdateMeRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SessionResponse:
+    user.first_name = payload.first_name.strip()
+    user.last_name = payload.last_name.strip()
+    profile_data = dict(user.profile_data or {})
+    phone = (payload.phone or "").strip()
+    if phone:
+        profile_data["phone"] = phone
+    else:
+        profile_data.pop("phone", None)
+    user.profile_data = profile_data
+    db.commit()
+    db.refresh(user)
     return SessionResponse(user=UserResponse.model_validate(user))
 
 

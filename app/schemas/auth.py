@@ -33,6 +33,12 @@ class OtpRequest(BaseModel):
     code: str = Field(pattern=r"^\d{4}$")
 
 
+class UpdateMeRequest(BaseModel):
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    phone: str | None = Field(default=None, max_length=40)
+
+
 class RegistrationStartRequest(BaseModel):
     role: Literal["athlete", "guardian"]
     first_name: str = Field(min_length=1, max_length=100)
