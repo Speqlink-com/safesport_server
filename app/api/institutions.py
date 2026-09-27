@@ -8,9 +8,17 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import require_system_admin, verify_csrf
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.models.auth import User
 from app.models.institution import Institution, Sport
+from app.schemas.admin import (
+    AdminOverviewResponse,
+    AdminUserCreateRequest,
+    AdminUserResponse,
+    AdminUserUpdateRequest,
+)
 from app.schemas.institution import InstitutionResponse, SportCreateRequest, SportResponse
 from app.services.cloudinary_service import upload_institution_logo
+from app.services.security import hash_password
 
 catalog_router = APIRouter(prefix="/catalog", tags=["catalog"])
 admin_router = APIRouter(
@@ -23,6 +31,10 @@ settings = get_settings()
 
 def _sport_response(sport: Sport) -> SportResponse:
     return SportResponse(id=sport.id, name=sport.name, is_active=sport.is_active)
+
+
+def _user_response(user: User) -> AdminUserResponse:
+    return AdminUserResponse.model_validate(user)
 
 
 def _institution_response(institution: Institution) -> InstitutionResponse:
@@ -78,6 +90,82 @@ def public_sports(db: Session = Depends(get_db)) -> list[SportResponse]:
 def admin_institutions(db: Session = Depends(get_db)) -> list[InstitutionResponse]:
     institutions = db.scalars(select(Institution).order_by(Institution.name)).unique().all()
     return [_institution_response(item) for item in institutions]
+
+
+@admin_router.get("/overview", response_model=AdminOverviewResponse)
+def admin_overview(db: Session = Depends(get_db)) -> AdminOverviewResponse:
+    total_users = db.scalar(select(func.count()).select_from(User)) or 0
+    active_users = db.scalar(select(func.count()).select_from(User).where(User.is_active.is_(True))) or 0
+    institutions = db.scalar(select(func.count()).select_from(Institution)) or 0
+    active_institutions = db.scalar(
+        select(func.count()).select_from(Institution).where(Institution.is_active.is_(True))
+    ) or 0
+    sports = db.scalar(select(func.count()).select_from(Sport)) or 0
+    active_sports = db.scalar(select(func.count()).select_from(Sport).where(Sport.is_active.is_(True))) or 0
+    return AdminOverviewResponse(
+        total_users=total_users,
+        active_users=active_users,
+        institutions=institutions,
+        active_institutions=active_institutions,
+        sports=sports,
+        active_sports=active_sports,
+    )
+
+
+@admin_router.get("/users", response_model=list[AdminUserResponse])
+def admin_users(db: Session = Depends(get_db)) -> list[AdminUserResponse]:
+    users = db.scalars(select(User).order_by(User.created_at.desc())).all()
+    return [_user_response(user) for user in users]
+
+
+@admin_router.post(
+    "/users",
+    response_model=AdminUserResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_csrf)],
+)
+def create_admin_user(payload: AdminUserCreateRequest, db: Session = Depends(get_db)) -> AdminUserResponse:
+    user = User(
+        email=payload.email.lower(),
+        password_hash=hash_password(payload.password),
+        first_name=payload.first_name.strip(),
+        last_name=payload.last_name.strip(),
+        role=payload.role,
+        is_active=payload.is_active,
+        is_verified=True,
+    )
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "A user with this email already exists") from exc
+    db.refresh(user)
+    return _user_response(user)
+
+
+@admin_router.put(
+    "/users/{user_id}",
+    response_model=AdminUserResponse,
+    dependencies=[Depends(verify_csrf)],
+)
+def update_admin_user(
+    user_id: uuid.UUID,
+    payload: AdminUserUpdateRequest,
+    db: Session = Depends(get_db),
+) -> AdminUserResponse:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    user.first_name = payload.first_name.strip()
+    user.last_name = payload.last_name.strip()
+    user.role = payload.role
+    user.is_active = payload.is_active
+    if payload.password:
+        user.password_hash = hash_password(payload.password)
+    db.commit()
+    db.refresh(user)
+    return _user_response(user)
 
 
 @admin_router.post(

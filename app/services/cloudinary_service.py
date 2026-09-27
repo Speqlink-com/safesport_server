@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import time
 
 import httpx
@@ -11,6 +12,7 @@ ALLOWED_IMAGE_TYPES = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
+logger = logging.getLogger(__name__)
 
 
 async def upload_institution_logo(logo: UploadFile | None) -> str | None:
@@ -29,19 +31,17 @@ async def upload_institution_logo(logo: UploadFile | None) -> str | None:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Cloudinary is not configured")
 
     data = {"folder": settings.cloudinary_institution_folder}
-    if settings.cloudinary_upload_preset:
-        data["upload_preset"] = settings.cloudinary_upload_preset
-    elif settings.cloudinary_api_key and settings.cloudinary_api_secret:
+    if settings.cloudinary_api_key and settings.cloudinary_api_secret:
         timestamp = str(int(time.time()))
+        signed_params = {
+            "folder": settings.cloudinary_institution_folder,
+            "timestamp": timestamp,
+        }
         data["api_key"] = settings.cloudinary_api_key
         data["timestamp"] = timestamp
-        data["signature"] = _signature(
-            {
-                "folder": settings.cloudinary_institution_folder,
-                "timestamp": timestamp,
-            },
-            settings.cloudinary_api_secret,
-        )
+        data["signature"] = _signature(signed_params, settings.cloudinary_api_secret)
+    elif settings.cloudinary_upload_preset:
+        data["upload_preset"] = settings.cloudinary_upload_preset
     else:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Cloudinary upload credentials are not configured")
 
@@ -51,6 +51,7 @@ async def upload_institution_logo(logo: UploadFile | None) -> str | None:
         response = await client.post(url, data=data, files=files)
 
     if response.status_code >= 400:
+        logger.warning("Cloudinary logo upload failed: %s", _cloudinary_error(response))
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Cloudinary rejected the logo upload")
 
     secure_url = response.json().get("secure_url")
@@ -62,3 +63,14 @@ async def upload_institution_logo(logo: UploadFile | None) -> str | None:
 def _signature(params: dict[str, str], api_secret: str) -> str:
     payload = "&".join(f"{key}={value}" for key, value in sorted(params.items()) if value)
     return hashlib.sha1(f"{payload}{api_secret}".encode("utf-8")).hexdigest()
+
+
+def _cloudinary_error(response: httpx.Response) -> str:
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text[:300]
+    error = body.get("error")
+    if isinstance(error, dict) and isinstance(error.get("message"), str):
+        return error["message"]
+    return str(body)[:300]
