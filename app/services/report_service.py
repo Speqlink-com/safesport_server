@@ -9,6 +9,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -128,55 +130,150 @@ def _list_rows(c: canvas.Canvas, title: str, values: list, x: float, y: float, w
     return y - 2 * mm
 
 
+def _table_doc_header(canvas_obj: canvas.Canvas, doc, title: str, subtitle: str) -> None:
+    w, h = A4
+    canvas_obj.saveState()
+    canvas_obj.setFillColor(colors.HexColor("#EAF7F2"))
+    canvas_obj.rect(0, h - 34 * mm, w, 34 * mm, fill=1, stroke=0)
+    logo = _logo()
+    if logo:
+        canvas_obj.drawImage(logo, 18 * mm, h - 23 * mm, width=35 * mm, height=13 * mm, mask="auto", preserveAspectRatio=True)
+    canvas_obj.setFillColor(colors.HexColor("#0F172A"))
+    canvas_obj.setFont("Helvetica-Bold", 16)
+    canvas_obj.drawString(18 * mm, h - 29 * mm, title)
+    canvas_obj.setFont("Helvetica", 8)
+    canvas_obj.setFillColor(colors.HexColor("#475569"))
+    canvas_obj.drawRightString(w - 18 * mm, h - 17 * mm, subtitle)
+    canvas_obj.setFont("Helvetica", 7)
+    canvas_obj.drawCentredString(w / 2, 11 * mm, f"SafeSport confidential athlete report · page {doc.page}")
+    canvas_obj.restoreState()
+
+
+def _cell(value: object) -> Paragraph:
+    styles = getSampleStyleSheet()
+    style = ParagraphStyle("SafeSportCell", parent=styles["BodyText"], fontName="Helvetica", fontSize=7.4, leading=9.5, textColor=colors.HexColor("#334155"))
+    text = str(value if value not in (None, "") else "—")
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>")
+    return Paragraph(text, style)
+
+
+def _heading(text: str) -> Paragraph:
+    style = ParagraphStyle("SafeSportHeading", fontName="Helvetica-Bold", fontSize=11, leading=14, textColor=colors.HexColor("#0F766E"), spaceBefore=8, spaceAfter=6)
+    return Paragraph(text, style)
+
+
+def _make_table(rows: list[list[object]], widths: list[float] | None = None) -> Table:
+    table = Table([[ _cell(item) for item in row] for row in rows], colWidths=widths, repeatRows=1 if rows else 0, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ECFDF5")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0F766E")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.4),
+        ("LEADING", (0, 0), (-1, -1), 9.5),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    return table
+
+
+def _kv_table(items: list[tuple[str, object]]) -> Table:
+    return _make_table([["Field", "Value"], *items], [48 * mm, 125 * mm])
+
+
+def _dict_table(title: str, values: dict, key_label = "Item", value_label = "Value") -> list[object]:
+    rows: list[list[object]] = [[key_label, value_label]]
+    if values:
+        for key, value in values.items():
+            if isinstance(value, dict):
+                value = "\n".join(f"{k}: {v}" for k, v in value.items() if v not in (None, ""))
+            rows.append([str(key), value or "—"])
+    else:
+        rows.append(["—", "None recorded"])
+    return [_heading(title), _make_table(rows, [58 * mm, 115 * mm]), Spacer(1, 6)]
+
+
+def _list_table(title: str, values: list) -> list[object]:
+    rows: list[list[object]] = [["#", "Details"]]
+    if values:
+        for index, value in enumerate(values, 1):
+            if isinstance(value, dict):
+                value = "\n".join(f"{k}: {v}" for k, v in value.items() if v not in (None, ""))
+            rows.append([index, value or "—"])
+    else:
+        rows.append(["—", "None recorded"])
+    return [_heading(title), _make_table(rows, [14 * mm, 159 * mm]), Spacer(1, 6)]
+
+
 def build_full_report_pdf(data: AthleteReportData) -> bytes:
-    buf = BytesIO(); c = canvas.Canvas(buf, pagesize=A4); w, _ = A4
-    y = _header(c, "SafeSport Full Athlete Report", "Confidential health record")
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm, topMargin=42 * mm, bottomMargin=18 * mm)
+    story: list[object] = []
     athlete = data.athlete
-    fields = [
-        ("Athlete", _name(athlete)), ("Email", athlete.email), ("Institution", _profile(athlete, "organization_name")),
-        ("Sport", _profile(athlete, "sport_name")), ("Date of birth", _profile(athlete, "date_of_birth")),
-        ("Generated", "2026-09-27"),
-    ]
-    y = _section(c, "Basic details", y)
-    for i, (label, value) in enumerate(fields):
-        x = 18 * mm if i % 2 == 0 else 108 * mm
-        if i % 2 == 0 and i: y -= 12 * mm
-        c.setFillColor(colors.HexColor("#64748B")); c.setFont("Helvetica", 8); c.drawString(x, y, label.upper())
-        c.setFillColor(colors.HexColor("#0F172A")); c.setFont("Helvetica-Bold", 10); c.drawString(x, y - 11, str(value))
-    y -= 24 * mm
-    y = _section(c, "PPE assessments", y)
-    for item in data.assessments:
-        y = _ensure_space(c, y, "PPE assessments")
+    story.append(_heading("Basic details"))
+    story.append(_kv_table([
+        ("Athlete", _name(athlete)),
+        ("Email", athlete.email),
+        ("Institution / club", _profile(athlete, "organization_name")),
+        ("Sport", _profile(athlete, "sport_name")),
+        ("Date of birth", _profile(athlete, "date_of_birth")),
+        ("Report generated", "2026-09-27"),
+    ]))
+    story.append(Spacer(1, 8))
+    story.append(_heading("Consent records"))
+    story.append(_make_table(
+        [["Version", "Clinical", "Video", "Research", "Assent", "Signer", "Recorded"]] +
+        ([[c.version, c.clinical, c.video, c.research, c.assent, c.signer, (c.consented_at or c.updated_at)] for c in data.consents] or [["—", "No consent record", "—", "—", "—", "—", "—"]]),
+        [28 * mm, 25 * mm, 18 * mm, 22 * mm, 18 * mm, 35 * mm, 27 * mm],
+    ))
+    for index, item in enumerate(data.assessments, 1):
         payload = _payload(item)
-        c.setFont("Helvetica-Bold", 10); c.setFillColor(colors.HexColor("#0F172A"))
-        c.drawString(20 * mm, y, f"{item.created_at.date()} · {item.status} · {item.decision}")
-        y -= 5 * mm
-        c.setFont("Helvetica", 9); c.setFillColor(colors.HexColor("#334155"))
-        y = _wrap(c, f"Reviewed: {item.reviewed} | History submitted: {item.history_submitted} | Finalized: {item.finalized} | Certificate: {item.certificate_code or '—'}", 20 * mm, y, w - 40 * mm)
-        y = _wrap(c, f"Restrictions: {item.restrictions or 'None'} | Plan: {item.plan or 'None'} | Review date: {item.review_date or '—'}", 20 * mm, y, w - 40 * mm)
-        y = _wrap(c, f"Rationale: {item.rationale or '—'} | Signature: {item.signature or '—'} | Physio: {item.physio_status} {item.physio_note or ''}", 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Health history answers", payload.get("historyAnswers") or payload.get("history") or {}, 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Health follow-up details", payload.get("historyDetails") or payload.get("followups") or {}, 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Clinician resolutions", payload.get("historyResolutions") or {}, 20 * mm, y, w - 40 * mm)
-        y = _list_rows(c, "Injury history", payload.get("injuries") or [], 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Concussion history", payload.get("concussion") or {}, 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Physical exam", payload.get("exam") or {}, 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Exam notes", payload.get("examNotes") or {}, 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Musculoskeletal baseline", payload.get("baseline") or {}, 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Baseline notes", payload.get("baselineNotes") or {}, 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Vitals", payload.get("vitals") or {}, 20 * mm, y, w - 40 * mm)
-        y = _wrap(c, f"Sport-specific notes: {payload.get('sportNotes') or '—'}", 20 * mm, y, w - 40 * mm)
-        y = _dict_rows(c, "Care review", payload.get("careReview") or {}, 20 * mm, y, w - 40 * mm)
-    if not data.assessments: c.drawString(20 * mm, y, "No PPE assessments recorded."); y -= 8 * mm
-    y = _section(c, "Health, incident, rehabilitation and document records", y)
-    for record in data.records:
-        if y < 35 * mm: c.showPage(); y = _header(c, "SafeSport Full Athlete Report", "continued"); y = _section(c, "Health records continued", y)
-        c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.HexColor("#0F172A"))
-        c.drawString(20 * mm, y, f"{record.date or record.created_at.date()} · {record.collection} · {record.title} · {record.status}")
-        y -= 5 * mm; c.setFont("Helvetica", 9); c.setFillColor(colors.HexColor("#334155"))
-        y = _wrap(c, record.notes or record.outcome or record.coordination or "No narrative recorded.", 20 * mm, y, w - 40 * mm)
-    if not data.records: c.drawString(20 * mm, y, "No care records recorded.")
-    c.showPage(); c.save(); return buf.getvalue()
+        story.append(PageBreak())
+        story.append(_heading(f"PPE assessment {index}"))
+        story.append(_kv_table([
+            ("Date", item.created_at.date()),
+            ("Status", item.status),
+            ("History submitted", item.history_submitted),
+            ("Reviewed", item.reviewed),
+            ("Finalized", item.finalized),
+            ("Decision", item.decision),
+            ("Restrictions", item.restrictions or "None"),
+            ("Plan", item.plan or "None"),
+            ("Review date", item.review_date or "—"),
+            ("Rationale", item.rationale or "—"),
+            ("Clinician signature", item.signature or "—"),
+            ("Certificate", item.certificate_code or "—"),
+            ("Physio status", item.physio_status),
+            ("Physio note", item.physio_note or "—"),
+        ]))
+        story.extend(_dict_table("Health history answers", payload.get("historyAnswers") or payload.get("history") or {}, "Question", "Answer"))
+        story.extend(_dict_table("Health follow-up details", payload.get("historyDetails") or payload.get("followups") or {}, "Question", "Details"))
+        story.extend(_dict_table("Clinician resolutions", payload.get("historyResolutions") or {}, "Question", "Resolution"))
+        story.extend(_list_table("Injury history", payload.get("injuries") or []))
+        story.extend(_dict_table("Concussion history", payload.get("concussion") or {}, "Field", "Response"))
+        story.extend(_dict_table("Physical exam", payload.get("exam") or {}, "Domain", "Finding"))
+        story.extend(_dict_table("Exam notes", payload.get("examNotes") or {}, "Domain", "Notes"))
+        story.extend(_dict_table("Musculoskeletal baseline", payload.get("baseline") or {}, "Domain", "Finding"))
+        story.extend(_dict_table("Baseline notes", payload.get("baselineNotes") or {}, "Domain", "Notes"))
+        story.extend(_dict_table("Vitals", payload.get("vitals") or {}, "Vital", "Value"))
+        story.append(_heading("Sport-specific notes"))
+        story.append(_make_table([["Notes"], [payload.get("sportNotes") or "—"]], [173 * mm]))
+        story.extend(_dict_table("Care review", payload.get("careReview") or {}, "Field", "Details"))
+    if not data.assessments:
+        story.append(_heading("PPE assessments")); story.append(_make_table([["Status"], ["No PPE assessments recorded."]], [173 * mm]))
+    story.append(PageBreak())
+    story.append(_heading("Health, incident, rehabilitation and document records"))
+    story.append(_make_table(
+        [["Date", "Type", "Title", "Status", "Assigned", "Notes / outcome"]] +
+        ([[r.date or r.created_at.date(), r.collection, r.title, r.status, r.assigned or "—", r.notes or r.outcome or r.coordination or "—"] for r in data.records] or [["—", "—", "No care records recorded", "—", "—", "—"]]),
+        [23 * mm, 24 * mm, 38 * mm, 23 * mm, 30 * mm, 35 * mm],
+    ))
+    doc.build(story, onFirstPage=lambda c, d: _table_doc_header(c, d, "SafeSport Full Athlete Report", "Confidential health record"), onLaterPages=lambda c, d: _table_doc_header(c, d, "SafeSport Full Athlete Report", "continued"))
+    return buf.getvalue()
 
 
 def build_term_report_pdf(report: TermReport, athlete: User, records: list[CareRecord], assessments: list[PPEAssessment]) -> bytes:
