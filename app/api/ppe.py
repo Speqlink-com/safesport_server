@@ -187,26 +187,39 @@ def _payload(assessment: PPEAssessment) -> dict[str, Any]:
 def _encounter_response(assessment: PPEAssessment) -> PPEEncounterResponse:
     data = _payload(assessment)
     review_date = assessment.review_date.isoformat() if assessment.review_date else str(data.get("reviewDate") or "")
-    return PPEEncounterResponse(
-        **data,
-        id=str(assessment.id),
-        athleteId=str(assessment.athlete_user_id),
-        date=assessment.created_at.date().isoformat(),
-        status=assessment.status,
-        reviewed=assessment.reviewed,
-        historySubmitted=assessment.history_submitted,
-        finalized=assessment.finalized,
-        decision=assessment.decision,
-        restrictions=assessment.restrictions,
-        plan=assessment.plan,
-        reviewDate=review_date,
-        rationale=assessment.rationale,
-        signature=assessment.signature,
-        certificateCode=assessment.certificate_code,
-        certificateIssuedAt=assessment.certificate_issued_at,
-        physioStatus=assessment.physio_status,
-        physioNote=assessment.physio_note,
+    data.update(
+        {
+            "id": str(assessment.id),
+            "athleteId": str(assessment.athlete_user_id),
+            "date": assessment.created_at.date().isoformat(),
+            "status": assessment.status,
+            "reviewed": assessment.reviewed,
+            "historySubmitted": assessment.history_submitted,
+            "finalized": assessment.finalized,
+            "decision": assessment.decision,
+            "restrictions": assessment.restrictions,
+            "plan": assessment.plan,
+            "reviewDate": review_date,
+            "rationale": assessment.rationale,
+            "signature": assessment.signature,
+            "certificateCode": assessment.certificate_code,
+            "certificateIssuedAt": assessment.certificate_issued_at,
+            "physioStatus": assessment.physio_status,
+            "physioNote": assessment.physio_note,
+        }
     )
+    return PPEEncounterResponse(**data)
+
+
+def _claim_or_require_clinician(assessment: PPEAssessment, user: User) -> None:
+    if user.role != "clinician":
+        return
+    if assessment.clinician_user_id and assessment.clinician_user_id != user.id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This PPE assessment is already assigned to another clinician",
+        )
+    assessment.clinician_user_id = user.id
 
 
 def _assessment_from_payload(assessment: PPEAssessment, payload: PPEAssessmentPayload) -> None:
@@ -342,8 +355,7 @@ def start_assessment(payload: PPEStartRequest, user: User = Depends(current_user
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Clinical role is required")
     athlete = _require_athlete_access(db, user, payload.athlete_id)
     assessment = _ensure_assessment(db, athlete)
-    if user.role == "clinician":
-        assessment.clinician_user_id = user.id
+    _claim_or_require_clinician(assessment, user)
     if assessment.status == "draft":
         assessment.status = "in_progress"
     db.commit()
@@ -359,8 +371,7 @@ def save_assessment(assessment_id: uuid.UUID, payload: PPEAssessmentPayload, use
     if not assessment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Assessment not found")
     _require_athlete_access(db, user, str(assessment.athlete_user_id))
-    if user.role == "clinician":
-        assessment.clinician_user_id = user.id
+    _claim_or_require_clinician(assessment, user)
     payload.finalized = False
     payload.status = "in_progress"
     _assessment_from_payload(assessment, payload)
@@ -377,10 +388,10 @@ def finalize_assessment(assessment_id: uuid.UUID, payload: PPEAssessmentPayload,
     if not assessment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Assessment not found")
     _require_athlete_access(db, user, str(assessment.athlete_user_id))
+    _claim_or_require_clinician(assessment, user)
     payload.finalized = True
     payload.status = "complete"
     _assessment_from_payload(assessment, payload)
-    assessment.clinician_user_id = user.id
     assessment.finalized = True
     assessment.status = "complete"
     assessment.certificate_code = assessment.certificate_code or f"SAFE-{str(assessment.id)[:8].upper()}"
