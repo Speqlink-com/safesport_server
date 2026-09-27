@@ -51,6 +51,10 @@ class PPEStartRequest(BaseModel):
     athlete_id: str
 
 
+class PPEBulkDeleteRequest(BaseModel):
+    assessment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=100)
+
+
 class PPEPhysioReviewRequest(BaseModel):
     status: Literal["not_required", "pending", "reviewed", "complete"] = "reviewed"
     note: str = Field(default="", max_length=2000)

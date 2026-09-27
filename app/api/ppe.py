@@ -16,6 +16,7 @@ from app.schemas.ppe import (
     CertificateVerifyResponse,
     PPEAssessmentPayload,
     PPEAthleteResponse,
+    PPEBulkDeleteRequest,
     PPEConsentPayload,
     PPEConsentResponse,
     PPEEncounterResponse,
@@ -406,6 +407,41 @@ def finalize_assessment(assessment_id: uuid.UUID, payload: PPEAssessmentPayload,
     db.commit()
     db.refresh(assessment)
     return _encounter_response(assessment)
+
+
+@router.delete("/assessments/{assessment_id}", dependencies=[Depends(verify_csrf)])
+def delete_assessment(assessment_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    if user.role != "clinician":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Clinician role is required")
+    assessment = db.get(PPEAssessment, assessment_id)
+    if not assessment:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Assessment not found")
+    _require_athlete_access(db, user, str(assessment.athlete_user_id))
+    db.delete(assessment)
+    db.commit()
+    return {"detail": "Assessment deleted", "deleted": [str(assessment_id)]}
+
+
+@router.post("/assessments/delete-drafts", dependencies=[Depends(verify_csrf)])
+def delete_draft_assessments(payload: PPEBulkDeleteRequest, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    if user.role != "clinician":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Clinician role is required")
+    if not payload.assessment_ids:
+        return {"detail": "No draft assessments selected", "deleted": []}
+    assessments = list(db.scalars(select(PPEAssessment).where(PPEAssessment.id.in_(payload.assessment_ids))).all())
+    by_id = {assessment.id: assessment for assessment in assessments}
+    missing = [assessment_id for assessment_id in payload.assessment_ids if assessment_id not in by_id]
+    if missing:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "One or more assessments were not found")
+    deleted: list[str] = []
+    for assessment in assessments:
+        _require_athlete_access(db, user, str(assessment.athlete_user_id))
+        if assessment.finalized or assessment.history_submitted or assessment.status != "draft":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only unsubmitted draft assessments can be bulk deleted")
+        deleted.append(str(assessment.id))
+        db.delete(assessment)
+    db.commit()
+    return {"detail": "Draft assessments deleted", "deleted": deleted}
 
 
 @router.post("/assessments/{assessment_id}/physio-review", response_model=PPEEncounterResponse, dependencies=[Depends(verify_csrf)])
