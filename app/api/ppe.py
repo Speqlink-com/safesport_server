@@ -264,8 +264,9 @@ def _notices(user: User, athletes: list[User], consents: dict[str, PPEConsentRes
     now = datetime.now(timezone.utc).isoformat()
     for athlete in athletes:
         aid = str(athlete.id)
-        active = next((e for e in encounters if e.athleteId == aid and not e.finalized), None)
-        latest = next((e for e in encounters if e.athleteId == aid), None)
+        latest_finalized = next((e for e in encounters if e.athleteId == aid and e.finalized), None)
+        active = None if latest_finalized else next((e for e in encounters if e.athleteId == aid and not e.finalized), None)
+        latest = latest_finalized or next((e for e in encounters if e.athleteId == aid), None)
         name = f"{athlete.first_name} {athlete.last_name}"
         if user.role == "athlete" and active and not active.historySubmitted:
             output.append(PPENoticeResponse(id=f"ppe-start-{aid}", role=user.role, title="Start your PPE health questionnaire", path="questionnaires", date=now))

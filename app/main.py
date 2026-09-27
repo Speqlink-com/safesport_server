@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.auth import router as auth_router
+from app.api.care import router as care_router
 from app.api.institutions import admin_router, catalog_router
 from app.api.ppe import router as ppe_router
 from app.core.config import get_settings
@@ -22,6 +23,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(catalog_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(ppe_router, prefix="/api/v1")
+app.include_router(care_router, prefix="/api/v1")
 Path(settings.uploads_dir).mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=settings.uploads_dir), name="uploads")
 
