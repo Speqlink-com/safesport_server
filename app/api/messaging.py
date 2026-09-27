@@ -15,6 +15,7 @@ from app.services.cloudinary_service import upload_message_attachment
 router = APIRouter(prefix="/messaging", tags=["messaging"])
 GLOBAL_ROLES = {"clinician", "physiotherapist", "sys-admin"}
 INSTITUTION_LOCAL_ROLES = {"athlete", "guardian", "coach", "institution"}
+TOP_GROUP_ROLES = {"clinician", "physiotherapist", "sys-admin", "operations"}
 connections: dict[str, set[WebSocket]] = defaultdict(set)
 
 
@@ -81,8 +82,13 @@ def _group_title(institution: Institution | None) -> str:
 def _group_people(db: Session, institution_id: uuid.UUID | None, current_user: User) -> list[User]:
     users = list(db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.first_name, User.last_name)).all())
     people: list[User] = []
+    global_view = current_user.role in GLOBAL_ROLES
     for person in users:
-        if person.role in GLOBAL_ROLES:
+        if global_view:
+            if person.role in TOP_GROUP_ROLES:
+                people.append(person)
+            continue
+        if person.role in TOP_GROUP_ROLES:
             people.append(person)
             continue
         if institution_id and str((person.profile_data or {}).get("organization_id") or (person.profile_data or {}).get("institution_id") or "") == str(institution_id):
