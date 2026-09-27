@@ -17,6 +17,7 @@ class UserResponse(BaseModel):
     first_name: str
     last_name: str
     role: str
+    profile_data: dict[str, str] = {}
 
 
 class SessionResponse(BaseModel):
