@@ -16,6 +16,17 @@ router = APIRouter(prefix="/care", tags=["care records"])
 ALL_COLLECTIONS = ["referrals", "incidents", "plans", "sessions", "reviews", "events", "tasks", "documents"]
 CLINICAL_ROLES = {"clinician", "physiotherapist", "operations", "institution", "coach", "sys-admin"}
 MUTATE_ROLES = {"clinician", "physiotherapist", "operations", "institution", "coach"}
+DEMO_ASSIGNEE_MARKERS = ("dr sarah", "dr. sarah", "sarah njeri", "sarah ndungu", "dr njeri", "dr. njeri", "dr ndungu", "dr. ndungu")
+
+
+def _safe_assigned(name: str | None) -> str:
+    value = (name or "").strip()
+    if not value:
+        return ""
+    lower = value.lower()
+    if any(marker in lower for marker in DEMO_ASSIGNEE_MARKERS):
+        return "Care team"
+    return value
 
 
 def _visible_athlete_ids(db: Session, user: User) -> list[uuid.UUID]:
@@ -66,7 +77,7 @@ def _response(record: CareRecord) -> CareRecordResponse:
         status=record.status,
         date=record.date,
         notes=record.notes,
-        assigned=record.assigned,
+        assigned=_safe_assigned(record.assigned),
         kind=record.kind,
         outcome=record.outcome,
         coordination=record.coordination,
