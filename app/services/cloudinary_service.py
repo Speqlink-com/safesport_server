@@ -12,6 +12,10 @@ ALLOWED_IMAGE_TYPES = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
+ALLOWED_MESSAGE_TYPES = {
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+    "video/mp4", "video/webm", "application/pdf", "text/plain",
+}
 logger = logging.getLogger(__name__)
 
 
@@ -74,3 +78,40 @@ def _cloudinary_error(response: httpx.Response) -> str:
     if isinstance(error, dict) and isinstance(error.get("message"), str):
         return error["message"]
     return str(body)[:300]
+
+
+async def upload_message_attachment(file: UploadFile | None) -> str | None:
+    if file is None or not file.filename:
+        return None
+    settings = get_settings()
+    if (file.content_type or "") not in ALLOWED_MESSAGE_TYPES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Attachment must be an image, video, PDF or text file")
+    max_bytes = 10 * 1024 * 1024
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Attachment must be 10 MB or smaller")
+    if not settings.cloudinary_cloud_name:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Cloudinary is not configured")
+    folder = "safesport/messages"
+    data = {"folder": folder, "resource_type": "auto"}
+    if settings.cloudinary_api_key and settings.cloudinary_api_secret:
+        timestamp = str(int(time.time()))
+        signed_params = {"folder": folder, "timestamp": timestamp}
+        data["api_key"] = settings.cloudinary_api_key
+        data["timestamp"] = timestamp
+        data["signature"] = _signature(signed_params, settings.cloudinary_api_secret)
+    elif settings.cloudinary_upload_preset:
+        data["upload_preset"] = settings.cloudinary_upload_preset
+    else:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Cloudinary upload credentials are not configured")
+    url = f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/auto/upload"
+    files = {"file": (file.filename, content, file.content_type)}
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(url, data=data, files=files)
+    if response.status_code >= 400:
+        logger.warning("Cloudinary attachment upload failed: %s", _cloudinary_error(response))
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Cloudinary rejected the attachment upload")
+    secure_url = response.json().get("secure_url")
+    if not secure_url:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Cloudinary did not return an attachment URL")
+    return str(secure_url)

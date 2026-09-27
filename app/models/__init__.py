@@ -2,8 +2,11 @@ from app.models.auth import OtpChallenge, PasswordReset, PendingRegistration, Re
 from app.models.institution import Institution, Sport, institution_sports
 from app.models.ppe import PPEAssessment, PPEConsent
 from app.models.care import CareRecord
+from app.models.reporting import TermReport
+from app.models.messaging import Conversation, ConversationMember, Message
 
 __all__ = [
     "User", "OtpChallenge", "PendingRegistration", "RefreshSession", "PasswordReset",
     "Institution", "Sport", "institution_sports", "PPEAssessment", "PPEConsent", "CareRecord",
+    "TermReport", "Conversation", "ConversationMember", "Message",
 ]
