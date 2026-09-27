@@ -154,10 +154,12 @@ async def registration_start(
         sport = next((item for item in institution.sports if item.id == sport_id), None) if institution else None
         if not institution or not institution.is_active or not sport or not sport.is_active:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The selected institution or sport is unavailable")
+        logo_url = institution.logo_path or ""
         profile_data = {
             "date_of_birth": payload.date_of_birth.isoformat() if payload.date_of_birth else "",
             "organization_id": str(institution.id),
             "organization_name": institution.name,
+            "organization_logo_url": logo_url,
             "sport_id": str(sport.id),
             "sport_name": sport.name,
         }

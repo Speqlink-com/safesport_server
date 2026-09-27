@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -12,6 +13,7 @@ from app.models.auth import User
 from app.models.institution import Institution, Sport
 from app.models.ppe import PPEAssessment, PPEConsent
 from app.schemas.ppe import (
+    CertificateVerifyResponse,
     PPEAssessmentPayload,
     PPEAthleteResponse,
     PPEConsentPayload,
@@ -22,6 +24,7 @@ from app.schemas.ppe import (
     PPEWorkspaceResponse,
     PPENoticeResponse,
 )
+from app.services.certificate_service import build_certificate_pdf, certificate_context
 
 router = APIRouter(prefix="/ppe", tags=["ppe"] )
 CLINICAL_ROLES = {"clinician", "physiotherapist", "operations", "sys-admin"}
@@ -423,20 +426,45 @@ def certificate(assessment_id: uuid.UUID, user: User = Depends(current_user), db
     if not assessment or not assessment.finalized:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate is not available")
     athlete = _require_athlete_access(db, user, str(assessment.athlete_user_id))
-    profile = dict(athlete.profile_data or {})
-    text = (
-        "SAFESPORT PARTICIPATION CERTIFICATE\n"
-        "Minimum-necessary participation summary\n\n"
-        f"Athlete: {athlete.first_name} {athlete.last_name}\n"
-        f"Athlete ID: {athlete.id}\n"
-        f"Institution: {profile.get('organization_name', '—')}\n"
-        f"Sport: {profile.get('sport_name', '—')}\n"
-        f"Assessment date: {assessment.created_at.date().isoformat()}\n"
-        f"Eligibility: {assessment.decision.replace('_', ' ')}\n"
-        f"Restrictions: {assessment.restrictions or 'None specified'}\n"
-        f"Monitoring: {assessment.plan or 'None specified'}\n"
-        f"Review date: {assessment.review_date.isoformat() if assessment.review_date else '—'}\n"
-        f"Signing clinician: {assessment.signature}\n"
-        f"Verification code: {assessment.certificate_code}\n"
+    context = certificate_context(athlete, assessment)
+    if not context.institution_logo_url:
+        profile = dict(athlete.profile_data or {})
+        try:
+            institution = db.get(Institution, uuid.UUID(str(profile.get("organization_id") or "")))
+        except ValueError:
+            institution = None
+        if institution and institution.logo_path:
+            context = replace(context, institution_logo_url=institution.logo_path)
+    pdf = build_certificate_pdf(context)
+    return Response(
+        pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=safesport-certificate-{context.verification_code}.pdf",
+            "X-Certificate-Code": context.verification_code,
+        },
     )
-    return Response(text, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename=safesport-{assessment.certificate_code}.txt"})
+
+
+@router.get("/certificates/verify/{code}", response_model=CertificateVerifyResponse)
+def verify_certificate(code: str, db: Session = Depends(get_db)) -> CertificateVerifyResponse:
+    assessment = db.scalar(select(PPEAssessment).where(PPEAssessment.certificate_code == code.upper()))
+    if not assessment or not assessment.finalized:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+    athlete = db.get(User, assessment.athlete_user_id)
+    if not athlete:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+    context = certificate_context(athlete, assessment)
+    return CertificateVerifyResponse(
+        valid=True,
+        code=context.verification_code,
+        athlete_name=context.athlete_name,
+        athlete_id=context.athlete_id,
+        institution=context.institution,
+        sport=context.sport,
+        eligibility=context.decision,
+        restrictions=context.restrictions,
+        review_date=context.review_date,
+        clinician_signature=context.clinician_signature,
+        issued_at=assessment.certificate_issued_at,
+    )

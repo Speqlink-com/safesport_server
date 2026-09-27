@@ -105,3 +105,17 @@ class PPEWorkspaceResponse(BaseModel):
     consents: dict[str, PPEConsentResponse]
     encounters: list[PPEEncounterResponse]
     notices: list[PPENoticeResponse]
+
+
+class CertificateVerifyResponse(BaseModel):
+    valid: bool
+    code: str
+    athlete_name: str
+    athlete_id: str
+    institution: str
+    sport: str
+    eligibility: str
+    restrictions: str
+    review_date: str
+    clinician_signature: str
+    issued_at: datetime | None
