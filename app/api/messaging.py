@@ -74,32 +74,70 @@ def _direct_conversation(db: Session, user: User, recipient: User) -> Conversati
     conv=Conversation(kind="direct", title=f"{_name(user)} / {_name(recipient)}", institution_id=_institution_id(user, db) or _institution_id(recipient, db), created_by_user_id=user.id)
     db.add(conv); db.flush(); db.add_all([ConversationMember(conversation_id=conv.id,user_id=user.id), ConversationMember(conversation_id=conv.id,user_id=recipient.id)]); db.commit(); db.refresh(conv); return conv
 
-def _family_conversation(db: Session, user: User) -> Conversation | None:
-    inst = _institution_id(user, db)
-    if not inst and user.role not in {"institution"}:
-        return None
-    title = "Institution family group"
-    conv = db.scalar(select(Conversation).where(Conversation.kind == "institution_group", Conversation.institution_id == inst)) if inst else None
+def _group_title(institution: Institution | None) -> str:
+    return f"{institution.name} family group" if institution else "Institution family group"
+
+
+def _group_people(db: Session, institution_id: uuid.UUID | None, current_user: User) -> list[User]:
+    users = list(db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.first_name, User.last_name)).all())
+    people: list[User] = []
+    for person in users:
+        if person.role in GLOBAL_ROLES:
+            people.append(person)
+            continue
+        if institution_id and str((person.profile_data or {}).get("organization_id") or (person.profile_data or {}).get("institution_id") or "") == str(institution_id):
+            people.append(person)
+        elif not institution_id and current_user.role == "institution" and person.role in INSTITUTION_LOCAL_ROLES:
+            people.append(person)
+    if current_user not in people:
+        people.append(current_user)
+    return people
+
+
+def _ensure_group(db: Session, institution: Institution | None, user: User) -> Conversation:
+    inst_id = institution.id if institution else None
+    conv = db.scalar(select(Conversation).where(Conversation.kind == "institution_group", Conversation.institution_id == inst_id)) if inst_id else None
     if not conv:
-        conv = Conversation(kind="institution_group", title=title, institution_id=inst, created_by_user_id=user.id)
+        conv = Conversation(kind="institution_group", title=_group_title(institution), institution_id=inst_id, created_by_user_id=user.id)
         db.add(conv)
         db.flush()
-    people = [user] + [person for person in _allowed_people(user, db) if person.role in INSTITUTION_LOCAL_ROLES or person.role in GLOBAL_ROLES]
-    for person in people:
+    else:
+        conv.title = _group_title(institution)
+    for person in _group_people(db, inst_id, user):
         if not _is_member(db, conv.id, person.id):
             db.add(ConversationMember(conversation_id=conv.id, user_id=person.id))
     db.commit()
     db.refresh(conv)
     return conv
 
+
+def _family_conversations(db: Session, user: User) -> list[Conversation]:
+    if user.role in GLOBAL_ROLES:
+        institutions = list(db.scalars(select(Institution).where(Institution.is_active.is_(True)).order_by(Institution.name)).all())
+        return [_ensure_group(db, institution, user) for institution in institutions]
+    inst = _institution_id(user, db)
+    institution = db.get(Institution, inst) if inst else None
+    if not institution and user.role != "institution":
+        return []
+    return [_ensure_group(db, institution, user)]
+
 @router.get("/workspace", response_model=MessagingWorkspaceResponse)
 def workspace(user: User = Depends(current_user), db: Session = Depends(get_db)) -> MessagingWorkspaceResponse:
-    family = _family_conversation(db, user)
+    families = _family_conversations(db, user)
+    family_ids = {conversation.id for conversation in families}
     convs = list(db.scalars(select(Conversation).join(ConversationMember).where(ConversationMember.user_id == user.id).order_by(Conversation.created_at.desc())).unique().all())
-    # Keep one institution group plus direct conversations. Drop stale extra groups from older prototype runs.
-    filtered = [conversation for conversation in convs if conversation.kind == "direct" or (family and conversation.id == family.id)]
-    ordered = ([family] if family else []) + [conversation for conversation in filtered if not family or conversation.id != family.id]
-    return MessagingWorkspaceResponse(current_user=_user_response(user), people=[_user_response(u) for u in _allowed_people(user, db)], conversations=[_conversation_response(c, db) for c in ordered])
+    direct = [conversation for conversation in convs if conversation.kind == "direct"]
+    if user.role in GLOBAL_ROLES:
+        ordered = families + direct
+    else:
+        ordered = families[:1] + direct
+    seen: set[uuid.UUID] = set()
+    unique_ordered = []
+    for conversation in ordered:
+        if conversation.id not in seen:
+            unique_ordered.append(conversation)
+            seen.add(conversation.id)
+    return MessagingWorkspaceResponse(current_user=_user_response(user), people=[_user_response(u) for u in _allowed_people(user, db)], conversations=[_conversation_response(c, db) for c in unique_ordered])
 
 @router.post("/conversations/direct/{recipient_id}", response_model=ConversationResponse, dependencies=[Depends(verify_csrf)])
 def start_direct(recipient_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)) -> ConversationResponse:
