@@ -8,6 +8,12 @@ This directory contains the FastAPI authentication foundation only. It uses Post
 2. From `server/`, run `uv sync` for local development or `docker compose up --build` for Docker development.
 3. The API is available at `http://localhost:8000`; interactive docs are at `/docs`.
 
+If port 8000 is already in use, choose another host port without changing the container:
+
+```bash
+SAFESPORT_PORT=8001 docker compose up --build
+```
+
 For development without SMTP delivery, set `EMAIL_DELIVERY_MODE=console`. This confirms email dispatch without printing OTP codes or reset links.
 
 ## Migrations and tests
@@ -26,3 +32,5 @@ Create the first System Administrator and base sport catalogue after migrations 
 ```
 
 The command prompts for the email, name, and password. It uses the running Docker API container when available, otherwise it falls back to local `uv`. Other staff roles can still be created with `uv run python -m scripts.create_user`.
+
+Production deployment for `server.ayothealthsolutions.ke` is documented in [DEPLOYMENT.md](DEPLOYMENT.md).

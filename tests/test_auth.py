@@ -159,10 +159,16 @@ def test_password_reset_uses_one_time_http_only_cookie(monkeypatch) -> None:
 
 def test_system_admin_creates_institution_for_athlete_catalog(monkeypatch) -> None:
     monkeypatch.setattr("app.services.otp_service.random_otp", lambda: "2468")
+
+    async def fake_logo_upload(_logo):
+        return "https://cdn.example.test/institutions/logo.png"
+
+    monkeypatch.setattr("app.api.institutions.upload_institution_logo", fake_logo_upload)
     with Session(engine) as db:
         db.add(
             User(
                 email="admin@example.com",
+                safesport_id="SAFE-ADMIN1",
                 password_hash=hash_password("secure-admin-password"),
                 first_name="System",
                 last_name="Administrator",

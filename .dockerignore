@@ -1,7 +1,13 @@
 .env
+.env.*
+!.env.example
+.git
+.github
 .venv
 __pycache__
 .pytest_cache
-*.pyc
+*.py[cod]
 tests
-
+uploads
+certs
+*.log
