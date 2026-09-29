@@ -51,9 +51,9 @@ Optionally enable **Always Use HTTPS** for the hostname or zone.
 
 Create a GitHub environment named `production` and add these environment secrets:
 
-- `DOCKERHUB_TOKEN` — a Docker Hub personal access token created while signed in as
+- `SAFESPORT_DOCKERHUB_TOKEN` — a Docker Hub personal access token created while signed in as
   `comphortinoe`, with **Read & Write** permission. Store only the token value: do
-  not include quotes, `DOCKERHUB_TOKEN=`, or surrounding whitespace.
+  not include quotes, `SAFESPORT_DOCKERHUB_TOKEN=`, or surrounding whitespace.
 - `POSTGRES_PASSWORD` — generate a URL-safe value with `openssl rand -hex 32`
 - `SECRET_KEY` — at least 32 random characters
 - `ZOHO_SMTP_USERNAME`, `ZOHO_SMTP_PASSWORD`, `ZOHO_FROM_EMAIL`
@@ -68,10 +68,11 @@ Add these only when movement video storage uses a separate Cloudinary account:
 
 Create a GitHub variable named `SAFESPORT_FRONTEND_URL` with the exact HTTPS frontend origin and no trailing slash. For compatibility, the workflow also accepts `FRONTEND_URL`, and either name may be stored as a variable or secret. If it is environment-scoped, it must be defined inside the `production` environment.
 
-The deploy job targets the `production` environment. If `DOCKERHUB_TOKEN` exists
-both as a repository secret and as a `production` environment secret, GitHub uses
-the environment secret. Keep one current value, or update the environment copy,
-to avoid authenticating with a stale token.
+The deploy job targets the `production` environment, so add
+`SAFESPORT_DOCKERHUB_TOKEN` specifically under that environment. GitHub gives an
+environment secret precedence over a repository secret with the same name. The
+SafeSport-specific name avoids accidentally using an older token configured for
+another deployment.
 
 No Cloudflare API token or tunnel token is required. The certificate and private key remain server-managed.
 

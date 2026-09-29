@@ -49,7 +49,7 @@ jobs:
 
       - name: Verify deployment configuration
         env:
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_TOKEN: ${{ secrets.SAFESPORT_DOCKERHUB_TOKEN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           ZOHO_SMTP_USERNAME: ${{ secrets.ZOHO_SMTP_USERNAME }}
@@ -101,9 +101,10 @@ jobs:
           fi
 
       - name: Log in to Docker Hub
-        env:
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+        uses: docker/login-action@v4
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.SAFESPORT_DOCKERHUB_TOKEN }}
 
       - name: Build and push immutable image
         env:
