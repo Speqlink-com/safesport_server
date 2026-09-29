@@ -70,6 +70,23 @@ def _today() -> str:
     return date.today().isoformat()
 
 
+def _user_institution_id(user: User, db: Session) -> uuid.UUID | None:
+    raw = (user.profile_data or {}).get("institution_id") or (user.profile_data or {}).get("organization_id")
+    if raw:
+        try:
+            return uuid.UUID(str(raw))
+        except ValueError:
+            return None
+    if user.role == "institution":
+        institution = db.scalar(select(Institution).where(Institution.contact_email == user.email))
+        return institution.id if institution else None
+    return None
+
+
+def _athlete_in_institution(athlete: User, institution_id: uuid.UUID) -> bool:
+    return str((athlete.profile_data or {}).get("organization_id") or (athlete.profile_data or {}).get("institution_id") or "") == str(institution_id)
+
+
 def _athlete_query(user: User):
     return select(User).where(User.role == "athlete", User.is_active.is_(True))
 
@@ -86,8 +103,14 @@ def _visible_athletes(db: Session, user: User) -> list[User]:
             except ValueError:
                 return []
         return []
-    if user.role in CLINICAL_ROLES | INSTITUTION_ROLES:
+    if user.role in CLINICAL_ROLES:
         return list(db.scalars(_athlete_query(user).order_by(User.created_at.desc())).all())
+    if user.role in INSTITUTION_ROLES:
+        institution_id = _user_institution_id(user, db)
+        if not institution_id:
+            return []
+        athletes = list(db.scalars(_athlete_query(user).order_by(User.created_at.desc())).all())
+        return [athlete for athlete in athletes if _athlete_in_institution(athlete, institution_id)]
     return []
 
 

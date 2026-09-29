@@ -9,6 +9,7 @@ from app.api.dependencies import current_user, verify_csrf
 from app.db.session import get_db
 from app.models.auth import User
 from app.models.care import CareRecord
+from app.models.institution import Institution
 from app.models.ppe import PPEAssessment
 from app.schemas.care import CareCollection, CareNoticeResponse, CareRecordPayload, CareRecordResponse, CareWorkspaceResponse
 
@@ -17,6 +18,23 @@ ALL_COLLECTIONS = ["referrals", "incidents", "plans", "sessions", "reviews", "ev
 CLINICAL_ROLES = {"clinician", "physiotherapist", "operations", "institution", "coach", "sys-admin"}
 MUTATE_ROLES = {"clinician", "physiotherapist", "operations", "institution", "coach"}
 DEMO_ASSIGNEE_MARKERS = ("dr sarah", "dr. sarah", "sarah njeri", "sarah ndungu", "dr njeri", "dr. njeri", "dr ndungu", "dr. ndungu")
+
+
+def _user_institution_id(user: User, db: Session) -> uuid.UUID | None:
+    raw = (user.profile_data or {}).get("institution_id") or (user.profile_data or {}).get("organization_id")
+    if raw:
+        try:
+            return uuid.UUID(str(raw))
+        except ValueError:
+            return None
+    if user.role == "institution":
+        institution = db.scalar(select(Institution).where(Institution.contact_email == user.email))
+        return institution.id if institution else None
+    return None
+
+
+def _athlete_in_institution(athlete: User, institution_id: uuid.UUID) -> bool:
+    return str((athlete.profile_data or {}).get("organization_id") or (athlete.profile_data or {}).get("institution_id") or "") == str(institution_id)
 
 
 def _safe_assigned(name: str | None) -> str:
@@ -37,6 +55,12 @@ def _visible_athlete_ids(db: Session, user: User) -> list[uuid.UUID]:
             return [uuid.UUID(str((user.profile_data or {}).get("athlete_id") or ""))]
         except ValueError:
             return []
+    if user.role in {"institution", "coach"}:
+        institution_id = _user_institution_id(user, db)
+        if not institution_id:
+            return []
+        athletes = list(db.scalars(select(User).where(User.role == "athlete", User.is_active.is_(True))).all())
+        return [athlete.id for athlete in athletes if _athlete_in_institution(athlete, institution_id)]
     if user.role in CLINICAL_ROLES:
         return list(db.scalars(select(User.id).where(User.role == "athlete", User.is_active.is_(True))).all())
     return []

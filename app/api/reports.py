@@ -14,7 +14,7 @@ from app.schemas.reporting import ReportSummary, TermReportGenerateRequest
 from app.services.report_service import build_full_report_pdf, build_term_report_pdf, full_report_data
 
 router = APIRouter(prefix="/reports", tags=["reports"])
-STAFF = {"clinician", "physiotherapist", "institution", "operations", "sys-admin"}
+STAFF = {"clinician", "physiotherapist", "institution", "coach", "operations", "sys-admin"}
 
 
 def _institution_id(user: User, db: Session) -> uuid.UUID | None:
@@ -38,8 +38,10 @@ def _athletes_in_scope(user: User, db: Session) -> list[User]:
     stmt = select(User).where(User.role == "athlete", User.is_active.is_(True))
     inst_id = _institution_id(user, db)
     athletes = list(db.scalars(stmt.order_by(User.created_at.desc())).all())
-    if user.role == "institution" and inst_id:
-        athletes = [a for a in athletes if str((a.profile_data or {}).get("organization_id") or "") == str(inst_id)]
+    if user.role in {"institution", "coach"}:
+        if not inst_id:
+            return []
+        athletes = [a for a in athletes if str((a.profile_data or {}).get("organization_id") or (a.profile_data or {}).get("institution_id") or "") == str(inst_id)]
     return athletes if user.role in STAFF else []
 
 
