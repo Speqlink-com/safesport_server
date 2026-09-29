@@ -129,22 +129,28 @@ async def upload_movement_video(file: UploadFile | None, screening_id: str) -> d
     content = await file.read(max_bytes + 1)
     if len(content) > max_bytes:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Video must be 80 MB or smaller")
-    if not settings.cloudinary_cloud_name:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Cloudinary is not configured")
-    folder = "safesport/movement/originals"
+    cloud_name = settings.movement_cloudinary_cloud_name or settings.cloudinary_cloud_name
+    api_key = settings.movement_cloudinary_api_key or settings.cloudinary_api_key
+    api_secret = settings.movement_cloudinary_api_secret or settings.cloudinary_api_secret
+    upload_preset = settings.movement_cloudinary_upload_preset or settings.cloudinary_upload_preset
+    folder = settings.movement_cloudinary_folder or "safesport/movement/originals"
+
+    if not cloud_name:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Movement video Cloudinary is not configured")
+
     public_id = f"{folder}/{screening_id}"
     data = {"folder": folder, "public_id": public_id, "resource_type": "video"}
-    if settings.cloudinary_api_key and settings.cloudinary_api_secret:
+    if api_key and api_secret:
         timestamp = str(int(time.time()))
         signed_params = {"folder": folder, "public_id": public_id, "timestamp": timestamp}
-        data["api_key"] = settings.cloudinary_api_key
+        data["api_key"] = api_key
         data["timestamp"] = timestamp
-        data["signature"] = _signature(signed_params, settings.cloudinary_api_secret)
-    elif settings.cloudinary_upload_preset:
-        data["upload_preset"] = settings.cloudinary_upload_preset
+        data["signature"] = _signature(signed_params, api_secret)
+    elif upload_preset:
+        data["upload_preset"] = upload_preset
     else:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Cloudinary upload credentials are not configured")
-    url = f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/video/upload"
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Movement video Cloudinary upload credentials are not configured")
+    url = f"https://api.cloudinary.com/v1_1/{cloud_name}/video/upload"
     files = {"file": (file.filename, content, file.content_type)}
     async with httpx.AsyncClient(timeout=120) as client:
         response = await client.post(url, data=data, files=files)

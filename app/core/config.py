@@ -41,6 +41,28 @@ class Settings(BaseSettings):
     cloudinary_upload_preset: str = ""
     cloudinary_institution_folder: str = "safesport/institutions"
 
+    redis_url: str = "redis://redis:6379/0"
+    redis_required: bool = False
+    llm_provider: str = ""
+    llm_model: str = ""
+    azure_openai_endpoint: str = ""
+    azure_openai_api_key: str = ""
+    azure_openai_deployment: str = ""
+    azure_openai_model_name: str = ""
+    azure_openai_api_version: str = "2025-04-01-preview"
+    pose_provider: str = "prototype"
+    pose_model: str = ""
+    pose_device: str = "cpu"
+    pose_confidence_threshold: float = 0.5
+    movement_temp_dir: str = "/tmp/safesport"
+    ai_job_max_retries: int = 3
+    movement_max_duration_seconds: int = 60
+    movement_cloudinary_cloud_name: str = ""
+    movement_cloudinary_api_key: str = ""
+    movement_cloudinary_api_secret: str = ""
+    movement_cloudinary_upload_preset: str = ""
+    movement_cloudinary_folder: str = "safesport/movement/originals"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
