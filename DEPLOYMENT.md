@@ -1,6 +1,6 @@
 # SafeSport production deployment
 
-SafeSport follows the Jubilee BizLead pattern: GitHub Actions builds the API image, the VPS runs PostgreSQL and Nginx, and a Cloudflare Origin Certificate secures the connection from Cloudflare to the VPS.
+SafeSport: GitHub Actions builds the API image, the VPS runs PostgreSQL and Nginx, and a Cloudflare Origin Certificate secures the connection from Cloudflare to the VPS.
 
 The VPS already uses ports `80/443` for Masqany and `8080/8443` for Jubilee. SafeSport therefore listens on TLS port `2053`. A Cloudflare Origin Rule maps the public hostname's normal HTTPS traffic to origin port `2053`, so clients still use `https://server.ayothealthsolutions.ke` without a port suffix.
 
