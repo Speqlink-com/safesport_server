@@ -64,7 +64,7 @@ Add these only when movement video storage uses a separate Cloudinary account:
 - `MOVEMENT_CLOUDINARY_API_KEY`
 - `MOVEMENT_CLOUDINARY_API_SECRET`
 
-Create the environment variable `SAFESPORT_FRONTEND_URL` with the exact HTTPS frontend origin and no trailing slash. The workflow uses it for redirects and CORS.
+Create a GitHub variable named `SAFESPORT_FRONTEND_URL` with the exact HTTPS frontend origin and no trailing slash. For compatibility, the workflow also accepts `FRONTEND_URL`, and either name may be stored as a variable or secret. If it is environment-scoped, it must be defined inside the `production` environment.
 
 No Cloudflare API token or tunnel token is required. The certificate and private key remain server-managed.
 
@@ -126,4 +126,3 @@ curl --insecure --resolve server.ayothealthsolutions.ke:2053:127.0.0.1 \
 ```
 
 Back up `safesport-postgres` before destructive migrations. Named database and upload volumes are retained during normal deployments.
-

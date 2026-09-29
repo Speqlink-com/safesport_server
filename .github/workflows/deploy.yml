@@ -62,14 +62,14 @@ jobs:
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
           AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
           AZURE_OPENAI_MODEL_NAME: ${{ secrets.AZURE_OPENAI_MODEL_NAME }}
-          FRONTEND_URL: ${{ vars.SAFESPORT_FRONTEND_URL }}
+          FRONTEND_URL: ${{ vars.SAFESPORT_FRONTEND_URL || vars.FRONTEND_URL || secrets.SAFESPORT_FRONTEND_URL || secrets.FRONTEND_URL }}
         run: |
           required=(
             DOCKERHUB_TOKEN POSTGRES_PASSWORD SECRET_KEY
             ZOHO_SMTP_USERNAME ZOHO_SMTP_PASSWORD
             ZOHO_FROM_EMAIL CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY
             CLOUDINARY_API_SECRET AZURE_OPENAI_ENDPOINT AZURE_OPENAI_API_KEY
-            AZURE_OPENAI_DEPLOYMENT AZURE_OPENAI_MODEL_NAME FRONTEND_URL
+            AZURE_OPENAI_DEPLOYMENT AZURE_OPENAI_MODEL_NAME
           )
           for variable in "${required[@]}"; do
             if [ -z "${!variable}" ]; then
@@ -77,6 +77,12 @@ jobs:
               exit 1
             fi
           done
+          if [ -z "$FRONTEND_URL" ]; then
+            echo "Required frontend URL is missing."
+            echo "Define SAFESPORT_FRONTEND_URL or FRONTEND_URL as a GitHub variable or secret."
+            echo "If it is environment-scoped, add it to the production environment."
+            exit 1
+          fi
           if [ "${#SECRET_KEY}" -lt 32 ]; then
             echo "SECRET_KEY must contain at least 32 characters"
             exit 1
@@ -130,7 +136,7 @@ jobs:
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
           AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
           AZURE_OPENAI_MODEL_NAME: ${{ secrets.AZURE_OPENAI_MODEL_NAME }}
-          FRONTEND_URL: ${{ vars.SAFESPORT_FRONTEND_URL }}
+          FRONTEND_URL: ${{ vars.SAFESPORT_FRONTEND_URL || vars.FRONTEND_URL || secrets.SAFESPORT_FRONTEND_URL || secrets.FRONTEND_URL }}
         run: |
           install -d -m 700 "$DEPLOY_DIR"
           install -d -m 700 "$DEPLOY_DIR/certs"
