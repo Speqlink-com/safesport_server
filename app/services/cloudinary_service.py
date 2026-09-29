@@ -168,8 +168,57 @@ async def upload_movement_video(file: UploadFile | None, screening_id: str) -> d
             "width": body.get("width"),
             "height": body.get("height"),
             "duration_seconds": body.get("duration"),
+            "fps": body.get("frame_rate") or body.get("fps") or 30,
             "format": body.get("format"),
             "bytes": body.get("bytes"),
             "resource_type": body.get("resource_type"),
         },
     }
+
+
+async def download_movement_video(source_url: str, target_path: str) -> str:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=180) as client:
+        async with client.stream("GET", source_url) as response:
+            response.raise_for_status()
+            with open(target_path, "wb") as output:
+                async for chunk in response.aiter_bytes():
+                    output.write(chunk)
+    return target_path
+
+
+def _movement_cloudinary_config() -> tuple[str, str, str, str]:
+    settings = get_settings()
+    cloud_name = settings.movement_cloudinary_cloud_name or settings.cloudinary_cloud_name
+    api_key = settings.movement_cloudinary_api_key or settings.cloudinary_api_key
+    api_secret = settings.movement_cloudinary_api_secret or settings.cloudinary_api_secret
+    folder = (settings.movement_cloudinary_folder or "safesport/movement/originals").rsplit("/originals", 1)[0]
+    if not cloud_name or not api_key or not api_secret:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Movement Cloudinary credentials are not configured")
+    return cloud_name, api_key, api_secret, folder
+
+
+async def upload_movement_artifact(path: str, screening_id: str, kind: str, public_id: str) -> dict[str, object]:
+    cloud_name, api_key, api_secret, base_folder = _movement_cloudinary_config()
+    folder = f"{base_folder}/{kind}/{screening_id}"
+    resource_type = "video" if kind == "overlays" else "image"
+    timestamp = str(int(time.time()))
+    signed_params = {"folder": folder, "public_id": public_id, "timestamp": timestamp}
+    data = {
+        "folder": folder,
+        "public_id": public_id,
+        "api_key": api_key,
+        "timestamp": timestamp,
+        "signature": _signature(signed_params, api_secret),
+        "resource_type": resource_type,
+        "overwrite": "true",
+    }
+    content_type = "video/mp4" if resource_type == "video" else "image/jpeg"
+    with open(path, "rb") as source:
+        files = {"file": (public_id, source.read(), content_type)}
+    url = f"https://api.cloudinary.com/v1_1/{cloud_name}/{resource_type}/upload"
+    async with httpx.AsyncClient(timeout=180) as client:
+        response = await client.post(url, data=data, files=files)
+    if response.status_code >= 400:
+        logger.warning("Cloudinary movement artifact upload failed: %s", _cloudinary_error(response))
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Cloudinary rejected the movement artifact")
+    return response.json()

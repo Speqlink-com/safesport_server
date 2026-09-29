@@ -55,13 +55,28 @@ class Settings(BaseSettings):
     pose_device: str = "cpu"
     pose_confidence_threshold: float = 0.5
     movement_temp_dir: str = "/tmp/safesport"
+    movement_min_width: int = 720
+    movement_min_height: int = 720
+    movement_min_fps: float = 24.0
+    movement_min_duration_seconds: float = 1.0
     ai_job_max_retries: int = 3
+    ai_queue_poll_seconds: float = 1.0
     movement_max_duration_seconds: int = 60
+    azure_openai_api_mode: Literal["auto", "foundry_v1", "azure_legacy"] = "auto"
     movement_cloudinary_cloud_name: str = ""
     movement_cloudinary_api_key: str = ""
     movement_cloudinary_api_secret: str = ""
     movement_cloudinary_upload_preset: str = ""
     movement_cloudinary_folder: str = "safesport/movement/originals"
+
+
+    @property
+    def azure_openai_uses_foundry_v1(self) -> bool:
+        if self.azure_openai_api_mode == "foundry_v1":
+            return True
+        if self.azure_openai_api_mode == "azure_legacy":
+            return False
+        return self.azure_openai_endpoint.rstrip("/").endswith("/openai/v1")
 
     @property
     def cors_origin_list(self) -> list[str]:

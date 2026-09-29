@@ -82,3 +82,20 @@ class MovementWorkspaceResponse(BaseModel):
     sessions: list[MovementSessionResponse]
     screenings: list[MovementScreeningResponse]
     notices: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class Observation(BaseModel):
+    finding: str
+    severity: str
+    confidence: float = Field(ge=0, le=1)
+    evidence_metrics: list[str] = Field(default_factory=list)
+    evidence_timestamps_ms: list[int] = Field(default_factory=list)
+
+
+class InterpretationOutput(BaseModel):
+    summary: str
+    observations: list[Observation] = Field(default_factory=list)
+    risk_interpretation: str = ""
+    suggested_prevention_focus: list[str] = Field(default_factory=list)
+    clinician_questions: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)

@@ -25,6 +25,7 @@ from app.schemas.movement import (
 )
 from app.services.cloudinary_service import upload_movement_video
 from app.services.movement_report_service import build_movement_report_pdf
+from app.services.movement_ai_service import run_movement_analysis
 
 router = APIRouter(prefix="/movement", tags=["movement screening"])
 CLINICAL_ROLES = {"clinician", "physiotherapist", "operations", "sys-admin"}
@@ -73,8 +74,14 @@ def _visible_athletes(user: User, db: Session) -> list[User]:
 
 
 def _require_athlete_by_safe_id(safesport_id: str, user: User, db: Session) -> User:
-    athlete = db.scalar(select(User).where(User.safesport_id == safesport_id.strip().upper(), User.role == "athlete", User.is_active.is_(True)))
-    if not athlete or athlete.id not in {item.id for item in _visible_athletes(user, db)}:
+    raw = safesport_id.strip()
+    athlete = db.scalar(select(User).where(User.safesport_id == raw.upper(), User.role == "athlete", User.is_active.is_(True)))
+    if not athlete:
+        try:
+            athlete = db.get(User, uuid.UUID(raw))
+        except ValueError:
+            athlete = None
+    if not athlete or athlete.role != "athlete" or athlete.id not in {item.id for item in _visible_athletes(user, db)}:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Athlete is not available in your scope")
     return athlete
 
@@ -222,14 +229,23 @@ async def upload_video(screening_id: uuid.UUID, video: UploadFile = File(...), u
 
 
 @router.post("/screenings/{screening_id}/analyze", response_model=MovementScreeningResponse, dependencies=[Depends(verify_csrf)])
-def analyze(screening_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)) -> MovementScreeningResponse:
+async def analyze(screening_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)) -> MovementScreeningResponse:
     if user.role not in CLINICAL_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Clinical staff start AI analysis")
     screening = db.get(MovementScreening, screening_id)
     if not screening or not screening.video_url:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Uploaded screening video not found")
-    screening.ai_result = _ai_result(screening)
-    screening.status = "AWAITING_CLINICIAN_REVIEW"
+    screening.status = "PROCESSING_POSE"
+    db.commit(); db.refresh(screening)
+    try:
+        result = await run_movement_analysis(screening)
+    except Exception as exc:
+        screening.status = "FAILED"
+        screening.ai_result = {"status": "FAILED", "summary": "AI analysis failed. Please review the video and try again.", "error": str(exc)[:500]}
+        db.commit(); db.refresh(screening)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "AI movement analysis failed") from exc
+    screening.ai_result = result
+    screening.status = "RETAKE_REQUIRED" if result.get("status") == "RETAKE_REQUIRED" else "AWAITING_CLINICIAN_REVIEW"
     db.commit(); db.refresh(screening)
     return _screening_response(screening)
 

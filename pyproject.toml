@@ -16,6 +16,11 @@ dependencies = [
   "sqlalchemy==2.0.44",
   "uvicorn[standard]==0.37.0",
   "reportlab==4.2.5",
+  "ultralytics>=8.3.0; sys_platform == 'linux'",
+  "scipy>=1.14.0",
+  "openai>=1.99.0",
+  "opencv-python-headless>=4.10.0",
+  "numpy>=1.26,<3",
 ]
 
 [dependency-groups]
