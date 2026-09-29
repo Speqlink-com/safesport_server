@@ -16,6 +16,7 @@ from app.models.auth import PasswordReset, PendingRegistration, RefreshSession, 
 from app.models.institution import Institution
 from app.schemas.auth import (
     ForgotPasswordRequest,
+    GuardianAthleteLookupResponse,
     LoginRequest,
     MessageResponse,
     OtpRequest,
@@ -40,6 +41,7 @@ from app.services.auth_service import (
 from app.services.email_service import email_service
 from app.services.email_templates import reset_email
 from app.services.otp_service import issue_otp, verify_otp
+from app.services.safesport_id import generate_safesport_id
 from app.services.security import create_jwt, decode_jwt, hash_password, hash_secret, is_expired, random_token, verify_password
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -135,6 +137,32 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
     return MessageResponse(detail="Signed out")
 
 
+@router.get("/register/guardian/athlete/{safesport_id}", response_model=GuardianAthleteLookupResponse)
+def guardian_athlete_lookup(safesport_id: str, db: Session = Depends(get_db)) -> GuardianAthleteLookupResponse:
+    normalized = safesport_id.strip().upper()
+    athlete = db.scalar(
+        select(User).where(
+            User.safesport_id == normalized,
+            User.role == "athlete",
+            User.is_active.is_(True),
+        )
+    )
+    if not athlete:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "We do not know that SafeSport ID. Confirm the ID shared by the athlete or contact admin.",
+        )
+    profile = athlete.profile_data or {}
+    return GuardianAthleteLookupResponse(
+        id=athlete.id,
+        safesport_id=athlete.safesport_id,
+        first_name=athlete.first_name,
+        last_name=athlete.last_name,
+        organization_name=str(profile.get("organization_name") or ""),
+        sport_name=str(profile.get("sport_name") or ""),
+    )
+
+
 @router.post("/register/start", response_model=MessageResponse, dependencies=[Depends(verify_csrf)])
 async def registration_start(
     payload: RegistrationStartRequest, response: Response, db: Session = Depends(get_db)
@@ -164,9 +192,24 @@ async def registration_start(
             "sport_name": sport.name,
         }
     else:
+        try:
+            athlete_uuid = uuid.UUID(payload.athlete_id or "")
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "We do not know that SafeSport ID. Confirm the ID shared by the athlete or contact admin.",
+            ) from exc
+        athlete = db.get(User, athlete_uuid)
+        if not athlete or athlete.role != "athlete" or not athlete.is_active:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "We do not know that SafeSport ID. Confirm the ID shared by the athlete or contact admin.",
+            )
         profile_data = {
             "relationship": payload.relationship or "",
-            "athlete_id": payload.athlete_id or "",
+            "athlete_id": str(athlete.id),
+            "athlete_safesport_id": athlete.safesport_id,
+            "athlete_name": f"{athlete.first_name} {athlete.last_name}".strip(),
         }
     pending = PendingRegistration(
         email=email,
@@ -230,6 +273,7 @@ def registration_complete(request: Request, response: Response, db: Session = De
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email verification is required")
     user = User(
         email=pending.email,
+        safesport_id=generate_safesport_id(db),
         password_hash=pending.password_hash,
         first_name=pending.first_name,
         last_name=pending.last_name,

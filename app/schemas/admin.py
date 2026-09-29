@@ -20,12 +20,14 @@ class AdminUserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    safesport_id: str
     email: EmailStr
     first_name: str
     last_name: str
     role: str
     is_active: bool
     is_verified: bool
+    profile_data: dict[str, str] = {}
     created_at: datetime
 
 
@@ -36,6 +38,7 @@ class AdminUserCreateRequest(BaseModel):
     role: AdminRole
     password: str = Field(min_length=8, max_length=128)
     is_active: bool = True
+    institution_id: str | None = Field(default=None, max_length=100)
 
 
 class AdminUserUpdateRequest(BaseModel):
@@ -44,6 +47,7 @@ class AdminUserUpdateRequest(BaseModel):
     role: AdminRole
     password: str | None = Field(default=None, min_length=8, max_length=128)
     is_active: bool = True
+    institution_id: str | None = Field(default=None, max_length=100)
 
 
 class AdminOverviewResponse(BaseModel):

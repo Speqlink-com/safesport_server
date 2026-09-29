@@ -13,6 +13,7 @@ class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    safesport_id: str
     email: EmailStr
     first_name: str
     last_name: str
@@ -59,6 +60,15 @@ class RegistrationStartRequest(BaseModel):
         if self.role == "guardian" and (not self.relationship or not self.athlete_id):
             raise ValueError("Guardian relationship and athlete are required")
         return self
+
+
+class GuardianAthleteLookupResponse(BaseModel):
+    id: uuid.UUID
+    safesport_id: str
+    first_name: str
+    last_name: str
+    organization_name: str = ""
+    sport_name: str = ""
 
 
 class PendingRegistrationResponse(BaseModel):

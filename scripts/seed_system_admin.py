@@ -9,6 +9,7 @@ from app.db.session import SessionLocal
 from app.models.auth import User
 from app.models.institution import Sport
 from app.services.security import hash_password
+from app.services.safesport_id import generate_safesport_id
 
 DEFAULT_SPORTS = ("Athletics", "Basketball", "Football", "Netball", "Rugby")
 
@@ -58,6 +59,7 @@ def main() -> None:
         if user is None:
             user = User(
                 email=email,
+                safesport_id=generate_safesport_id(db),
                 password_hash=hash_password(password),
                 first_name=args.first_name.strip(),
                 last_name=args.last_name.strip(),

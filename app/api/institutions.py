@@ -19,6 +19,7 @@ from app.schemas.admin import (
 from app.schemas.institution import InstitutionResponse, SportCreateRequest, SportResponse
 from app.services.cloudinary_service import upload_institution_logo
 from app.services.security import hash_password
+from app.services.safesport_id import generate_safesport_id
 
 catalog_router = APIRouter(prefix="/catalog", tags=["catalog"])
 admin_router = APIRouter(
@@ -27,6 +28,32 @@ admin_router = APIRouter(
     dependencies=[Depends(require_system_admin)],
 )
 settings = get_settings()
+
+
+def _institution_profile(db: Session, role: str, institution_id: str | None, existing: dict[str, str] | None = None) -> dict[str, str]:
+    profile = dict(existing or {})
+    for key in ("institution_id", "organization_id", "organization_name", "organization_logo_url"):
+        profile.pop(key, None)
+    if role not in {"coach", "institution"}:
+        return profile
+    if not institution_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Institution is required for this role")
+    try:
+        parsed_id = uuid.UUID(institution_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Institution is invalid") from exc
+    institution = db.get(Institution, parsed_id)
+    if not institution or not institution.is_active:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Institution is unavailable")
+    profile.update(
+        {
+            "institution_id": str(institution.id),
+            "organization_id": str(institution.id),
+            "organization_name": institution.name,
+            "organization_logo_url": institution.logo_path or "",
+        }
+    )
+    return profile
 
 
 def _sport_response(sport: Sport) -> SportResponse:
@@ -127,12 +154,14 @@ def admin_users(db: Session = Depends(get_db)) -> list[AdminUserResponse]:
 def create_admin_user(payload: AdminUserCreateRequest, db: Session = Depends(get_db)) -> AdminUserResponse:
     user = User(
         email=payload.email.lower(),
+        safesport_id=generate_safesport_id(db),
         password_hash=hash_password(payload.password),
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
         role=payload.role,
         is_active=payload.is_active,
         is_verified=True,
+        profile_data=_institution_profile(db, payload.role, payload.institution_id),
     )
     db.add(user)
     try:
@@ -161,6 +190,7 @@ def update_admin_user(
     user.last_name = payload.last_name.strip()
     user.role = payload.role
     user.is_active = payload.is_active
+    user.profile_data = _institution_profile(db, payload.role, payload.institution_id, user.profile_data)
     if payload.password:
         user.password_hash = hash_password(payload.password)
     db.commit()

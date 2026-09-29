@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models.auth import User
 from app.services.security import hash_password
+from app.services.safesport_id import generate_safesport_id
 
 ROLES = ("athlete", "guardian", "clinician", "physiotherapist", "coach", "institution", "operations", "sys-admin")
 
@@ -26,6 +27,7 @@ def main() -> None:
         if user is None:
             user = User(
                 email=args.email.lower(),
+                safesport_id=generate_safesport_id(db),
                 password_hash=hash_password(args.password),
                 first_name=args.first_name,
                 last_name=args.last_name,
