@@ -111,6 +111,29 @@ class PPEWorkspaceResponse(BaseModel):
     notices: list[PPENoticeResponse]
 
 
+class PublicCertificateSummary(BaseModel):
+    assessment_id: str
+    code: str
+    athlete_name: str
+    safesport_id: str
+    institution: str
+    sport: str
+    eligibility: str
+    restrictions: str
+    review_date: str
+    clinician_signature: str
+    issued_at: datetime | None
+    download_url: str
+
+
+class PublicCertificateLookupResponse(BaseModel):
+    safesport_id: str
+    athlete_name: str
+    institution: str
+    sport: str
+    certificates: list[PublicCertificateSummary]
+
+
 class CertificateVerifyResponse(BaseModel):
     valid: bool
     code: str

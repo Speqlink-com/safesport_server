@@ -112,7 +112,7 @@ def certificate_context(athlete: User, assessment: PPEAssessment) -> Certificate
     verify_url = f"{settings.backend_public_url.rstrip()}/api/v1/ppe/certificates/verify/{code}"
     return CertificateContext(
         athlete_name=f"{athlete.first_name} {athlete.last_name}",
-        athlete_id=str(athlete.id),
+        athlete_id=athlete.safesport_id,
         institution=_safe(profile.get("organization_name")),
         institution_logo_url=profile.get("organization_logo_url") or profile.get("logo_url"),
         sport=_safe(profile.get("sport_name")),

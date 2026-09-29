@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import current_user, verify_csrf
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.auth import User
 from app.models.institution import Institution, Sport
@@ -24,12 +25,45 @@ from app.schemas.ppe import (
     PPEStartRequest,
     PPEWorkspaceResponse,
     PPENoticeResponse,
+    PublicCertificateLookupResponse,
+    PublicCertificateSummary,
 )
 from app.services.certificate_service import build_certificate_pdf, certificate_context
 
 router = APIRouter(prefix="/ppe", tags=["ppe"] )
+settings = get_settings()
 CLINICAL_ROLES = {"clinician", "physiotherapist", "operations", "sys-admin"}
 INSTITUTION_ROLES = {"institution", "coach"}
+
+
+def _certificate_context_with_logo(db: Session, athlete: User, assessment: PPEAssessment):
+    context = certificate_context(athlete, assessment)
+    if not context.institution_logo_url:
+        profile = dict(athlete.profile_data or {})
+        try:
+            institution = db.get(Institution, uuid.UUID(str(profile.get("organization_id") or "")))
+        except ValueError:
+            institution = None
+        if institution and institution.logo_path:
+            context = replace(context, institution_logo_url=institution.logo_path)
+    return context
+
+def _public_certificate_summary(settings_url: str, athlete: User, assessment: PPEAssessment) -> PublicCertificateSummary:
+    context = certificate_context(athlete, assessment)
+    return PublicCertificateSummary(
+        assessment_id=str(assessment.id),
+        code=context.verification_code,
+        athlete_name=context.athlete_name,
+        safesport_id=athlete.safesport_id,
+        institution=context.institution,
+        sport=context.sport,
+        eligibility=context.decision,
+        restrictions=context.restrictions,
+        review_date=context.review_date,
+        clinician_signature=context.clinician_signature,
+        issued_at=assessment.certificate_issued_at,
+        download_url=f"{settings_url}/ppe/certificates/public/download/{context.verification_code}",
+    )
 
 
 def _today() -> str:
@@ -459,21 +493,61 @@ def physio_review(assessment_id: uuid.UUID, payload: PPEPhysioReviewRequest, use
     return _encounter_response(assessment)
 
 
+@router.get("/certificates/public/by-safesport/{safesport_id}", response_model=PublicCertificateLookupResponse)
+def public_certificates_by_safesport_id(safesport_id: str, db: Session = Depends(get_db)) -> PublicCertificateLookupResponse:
+    normalized = safesport_id.strip().upper()
+    athlete = db.scalar(select(User).where(User.safesport_id == normalized, User.role == "athlete", User.is_active.is_(True)))
+    if not athlete:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No athlete was found for that SafeSport ID")
+    assessments = list(
+        db.scalars(
+            select(PPEAssessment)
+            .where(
+                PPEAssessment.athlete_user_id == athlete.id,
+                PPEAssessment.finalized.is_(True),
+                PPEAssessment.certificate_code.is_not(None),
+            )
+            .order_by(PPEAssessment.certificate_issued_at.desc().nullslast(), PPEAssessment.created_at.desc())
+        ).all()
+    )
+    profile = dict(athlete.profile_data or {})
+    settings_url = settings.backend_public_url.rstrip("/") + "/api/v1"
+    return PublicCertificateLookupResponse(
+        safesport_id=athlete.safesport_id,
+        athlete_name=f"{athlete.first_name} {athlete.last_name}".strip(),
+        institution=str(profile.get("organization_name") or ""),
+        sport=str(profile.get("sport_name") or ""),
+        certificates=[_public_certificate_summary(settings_url, athlete, assessment) for assessment in assessments],
+    )
+
+
+@router.get("/certificates/public/download/{code}")
+def public_certificate_download(code: str, db: Session = Depends(get_db)) -> Response:
+    assessment = db.scalar(select(PPEAssessment).where(PPEAssessment.certificate_code == code.strip().upper()))
+    if not assessment or not assessment.finalized:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+    athlete = db.get(User, assessment.athlete_user_id)
+    if not athlete or athlete.role != "athlete":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+    context = _certificate_context_with_logo(db, athlete, assessment)
+    pdf = build_certificate_pdf(context)
+    return Response(
+        pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=safesport-certificate-{context.verification_code}.pdf",
+            "X-Certificate-Code": context.verification_code,
+        },
+    )
+
+
 @router.get("/certificates/{assessment_id}")
 def certificate(assessment_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)) -> Response:
     assessment = db.get(PPEAssessment, assessment_id)
     if not assessment or not assessment.finalized:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate is not available")
     athlete = _require_athlete_access(db, user, str(assessment.athlete_user_id))
-    context = certificate_context(athlete, assessment)
-    if not context.institution_logo_url:
-        profile = dict(athlete.profile_data or {})
-        try:
-            institution = db.get(Institution, uuid.UUID(str(profile.get("organization_id") or "")))
-        except ValueError:
-            institution = None
-        if institution and institution.logo_path:
-            context = replace(context, institution_logo_url=institution.logo_path)
+    context = _certificate_context_with_logo(db, athlete, assessment)
     pdf = build_certificate_pdf(context)
     return Response(
         pdf,
