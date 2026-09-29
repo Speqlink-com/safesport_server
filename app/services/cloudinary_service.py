@@ -115,3 +115,55 @@ async def upload_message_attachment(file: UploadFile | None) -> str | None:
     if not secure_url:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Cloudinary did not return an attachment URL")
     return str(secure_url)
+
+ALLOWED_MOVEMENT_VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime"}
+
+
+async def upload_movement_video(file: UploadFile | None, screening_id: str) -> dict[str, object]:
+    if file is None or not file.filename:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Screening video is required")
+    settings = get_settings()
+    if (file.content_type or "") not in ALLOWED_MOVEMENT_VIDEO_TYPES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Video must be MP4, WebM or QuickTime")
+    max_bytes = 80 * 1024 * 1024
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Video must be 80 MB or smaller")
+    if not settings.cloudinary_cloud_name:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Cloudinary is not configured")
+    folder = "safesport/movement/originals"
+    public_id = f"{folder}/{screening_id}"
+    data = {"folder": folder, "public_id": public_id, "resource_type": "video"}
+    if settings.cloudinary_api_key and settings.cloudinary_api_secret:
+        timestamp = str(int(time.time()))
+        signed_params = {"folder": folder, "public_id": public_id, "timestamp": timestamp}
+        data["api_key"] = settings.cloudinary_api_key
+        data["timestamp"] = timestamp
+        data["signature"] = _signature(signed_params, settings.cloudinary_api_secret)
+    elif settings.cloudinary_upload_preset:
+        data["upload_preset"] = settings.cloudinary_upload_preset
+    else:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Cloudinary upload credentials are not configured")
+    url = f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/video/upload"
+    files = {"file": (file.filename, content, file.content_type)}
+    async with httpx.AsyncClient(timeout=120) as client:
+        response = await client.post(url, data=data, files=files)
+    if response.status_code >= 400:
+        logger.warning("Cloudinary movement video upload failed: %s", _cloudinary_error(response))
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Cloudinary rejected the screening video")
+    body = response.json()
+    secure_url = body.get("secure_url")
+    if not secure_url:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Cloudinary did not return a video URL")
+    return {
+        "video_url": str(secure_url),
+        "video_public_id": str(body.get("public_id") or public_id),
+        "metadata": {
+            "width": body.get("width"),
+            "height": body.get("height"),
+            "duration_seconds": body.get("duration"),
+            "format": body.get("format"),
+            "bytes": body.get("bytes"),
+            "resource_type": body.get("resource_type"),
+        },
+    }
