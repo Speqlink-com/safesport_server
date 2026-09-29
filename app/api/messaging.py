@@ -15,6 +15,8 @@ from app.services.cloudinary_service import upload_message_attachment
 router = APIRouter(prefix="/messaging", tags=["messaging"])
 GLOBAL_ROLES = {"clinician", "physiotherapist", "sys-admin"}
 INSTITUTION_LOCAL_ROLES = {"athlete", "guardian", "coach", "institution"}
+COACH_DIRECT_GLOBAL_ROLES = {"clinician", "physiotherapist", "sys-admin"}
+GLOBAL_DIRECT_ROLES = {"coach", "clinician", "physiotherapist", "sys-admin"}
 TOP_GROUP_ROLES = {"clinician", "physiotherapist", "sys-admin", "operations"}
 connections: dict[str, set[WebSocket]] = defaultdict(set)
 
@@ -46,14 +48,34 @@ def _same_institution(user: User, other: User, db: Session) -> bool:
 
 
 def _allowed_people(user: User, db: Session) -> list[User]:
-    if user.role in GLOBAL_ROLES:
-        return []
     users = list(db.scalars(select(User).where(User.is_active.is_(True), User.id != user.id).order_by(User.first_name, User.last_name)).all())
-    return [
-        other
-        for other in users
-        if other.role in GLOBAL_ROLES or (other.role in INSTITUTION_LOCAL_ROLES and _same_institution(user, other, db))
-    ]
+    allowed: list[User] = []
+    for other in users:
+        same_institution = _same_institution(user, other, db)
+        if user.role == "athlete":
+            if same_institution and other.role in {"athlete", "coach"}:
+                allowed.append(other)
+            continue
+        if user.role == "guardian":
+            if same_institution and other.role in {"guardian", "coach", "institution"}:
+                allowed.append(other)
+            continue
+        if user.role == "coach":
+            if other.role in COACH_DIRECT_GLOBAL_ROLES or (same_institution and other.role in INSTITUTION_LOCAL_ROLES):
+                allowed.append(other)
+            continue
+        if user.role in GLOBAL_ROLES:
+            if other.role in GLOBAL_DIRECT_ROLES:
+                allowed.append(other)
+            continue
+        if user.role == "institution":
+            if same_institution and other.role in {"coach", "guardian", "institution"}:
+                allowed.append(other)
+            continue
+        if user.role == "operations":
+            if other.role in {"coach", "institution", "clinician", "physiotherapist", "sys-admin"}:
+                allowed.append(other)
+    return allowed
 
 def _is_member(db: Session, conversation_id: uuid.UUID, user_id: uuid.UUID) -> bool:
     return bool(db.scalar(select(ConversationMember.id).where(ConversationMember.conversation_id == conversation_id, ConversationMember.user_id == user_id)))
@@ -132,7 +154,12 @@ def workspace(user: User = Depends(current_user), db: Session = Depends(get_db))
     families = _family_conversations(db, user)
     family_ids = {conversation.id for conversation in families}
     convs = list(db.scalars(select(Conversation).join(ConversationMember).where(ConversationMember.user_id == user.id).order_by(Conversation.created_at.desc())).unique().all())
-    direct = [] if user.role in GLOBAL_ROLES else [conversation for conversation in convs if conversation.kind == "direct"]
+    allowed_ids = {person.id for person in _allowed_people(user, db)}
+    direct = [
+        conversation
+        for conversation in convs
+        if conversation.kind == "direct" and any(member.user_id in allowed_ids for member in conversation.members if member.user_id != user.id)
+    ]
     ordered = families + direct if user.role in GLOBAL_ROLES else families[:1] + direct
     seen: set[uuid.UUID] = set()
     unique_ordered = []
