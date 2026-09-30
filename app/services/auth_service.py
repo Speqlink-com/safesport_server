@@ -59,11 +59,12 @@ def set_auth_cookies(response: Response, db: Session, user: User) -> None:
     )
     db.commit()
     set_http_only_cookie(response, ACCESS_COOKIE, access, access_seconds)
-    set_http_only_cookie(response, REFRESH_COOKIE, refresh, refresh_seconds, "/api/v1/auth")
+    set_http_only_cookie(response, REFRESH_COOKIE, refresh, refresh_seconds)
 
 
 def clear_auth_cookies(response: Response) -> None:
     clear_cookie(response, ACCESS_COOKIE)
+    clear_cookie(response, REFRESH_COOKIE)
     clear_cookie(response, REFRESH_COOKIE, "/api/v1/auth")
 
 
@@ -133,7 +134,6 @@ def rotate_refresh_token(request: Request, response: Response, db: Session) -> U
         REFRESH_COOKIE,
         create_jwt(str(user.id), "refresh", timedelta(seconds=refresh_seconds), replacement_jti),
         refresh_seconds,
-        "/api/v1/auth",
     )
     return user
 
