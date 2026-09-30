@@ -376,7 +376,10 @@ def save_consent(athlete_id: str, payload: PPEConsentPayload, user: User = Depen
     consent.consented_at = datetime.now(timezone.utc)
     active = _active_assessment(db, athlete)
     if active and not active.finalized:
-        active.status = "in_progress" if consent.clinical == "obtained" else "blocked"
+        if consent.clinical == "obtained" and active.status == "blocked":
+            active.status = "needs_review" if active.history_submitted else "in_progress"
+        elif consent.clinical != "obtained" and not active.history_submitted and active.status in {"draft", "in_progress", "blocked"}:
+            active.status = "blocked"
     db.commit()
     db.refresh(consent)
     return _consent_response(str(athlete.id), consent)
