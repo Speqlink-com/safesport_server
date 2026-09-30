@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     frontend_url: str = "http://localhost:3000"
     backend_public_url: str = "http://localhost:8000"
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,https://safesport.ayothealthsolutions.ke"
     cookie_secure: bool = False
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     cookie_domain: str | None = None
