@@ -28,9 +28,12 @@ The frontend must set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`. Browse
 Create the first System Administrator and base sport catalogue after migrations run:
 
 ```bash
-./seed
+./scripts/seed
 ```
 
-The command prompts for the email, name, and password. It uses the running Docker API container when available, otherwise it falls back to local `uv`. Other staff roles can still be created with `uv run python -m scripts.create_user`.
+The command prompts for the email, name, and password and uses the local
+application environment. In production, run the copy packaged in the API
+container with `docker exec -it safesport-api /app/scripts/seed`. Other staff
+roles can still be created with `uv run python -m scripts.create_user`.
 
 Production deployment for `server.ayothealthsolutions.ke` is documented in [DEPLOYMENT.md](DEPLOYMENT.md).
