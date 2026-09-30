@@ -30,11 +30,14 @@ admin_router = APIRouter(
 settings = get_settings()
 
 
+INSTITUTION_SCOPED_ROLES = {"athlete", "coach", "institution"}
+
+
 def _institution_profile(db: Session, role: str, institution_id: str | None, existing: dict[str, str] | None = None) -> dict[str, str]:
     profile = dict(existing or {})
     for key in ("institution_id", "organization_id", "organization_name", "organization_logo_url"):
         profile.pop(key, None)
-    if role not in {"coach", "institution"}:
+    if role not in INSTITUTION_SCOPED_ROLES:
         return profile
     if not institution_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Institution is required for this role")

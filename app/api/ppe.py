@@ -83,8 +83,23 @@ def _user_institution_id(user: User, db: Session) -> uuid.UUID | None:
     return None
 
 
-def _athlete_in_institution(athlete: User, institution_id: uuid.UUID) -> bool:
-    return str((athlete.profile_data or {}).get("organization_id") or (athlete.profile_data or {}).get("institution_id") or "") == str(institution_id)
+def _user_institution_name(user: User, db: Session) -> str:
+    profile = user.profile_data or {}
+    name = str(profile.get("organization_name") or profile.get("institution_name") or "").strip()
+    if name:
+        return name.casefold()
+    institution_id = _user_institution_id(user, db)
+    institution = db.get(Institution, institution_id) if institution_id else None
+    return institution.name.casefold() if institution else ""
+
+
+def _athlete_matches_institution_scope(athlete: User, institution_id: uuid.UUID | None, institution_name: str) -> bool:
+    profile = athlete.profile_data or {}
+    athlete_institution_id = str(profile.get("organization_id") or profile.get("institution_id") or "")
+    if institution_id and athlete_institution_id == str(institution_id):
+        return True
+    athlete_institution_name = str(profile.get("organization_name") or profile.get("institution_name") or "").strip().casefold()
+    return bool(institution_name and athlete_institution_name and athlete_institution_name == institution_name)
 
 
 def _athlete_query(user: User):
@@ -107,10 +122,11 @@ def _visible_athletes(db: Session, user: User) -> list[User]:
         return list(db.scalars(_athlete_query(user).order_by(User.created_at.desc())).all())
     if user.role in INSTITUTION_ROLES:
         institution_id = _user_institution_id(user, db)
-        if not institution_id:
+        institution_name = _user_institution_name(user, db)
+        if not institution_id and not institution_name:
             return []
         athletes = list(db.scalars(_athlete_query(user).order_by(User.created_at.desc())).all())
-        return [athlete for athlete in athletes if _athlete_in_institution(athlete, institution_id)]
+        return [athlete for athlete in athletes if _athlete_matches_institution_scope(athlete, institution_id, institution_name)]
     return []
 
 
