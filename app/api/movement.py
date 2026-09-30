@@ -2,12 +2,12 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import current_user, verify_csrf
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models.auth import User
 from app.models.care import CareRecord
 from app.models.institution import Institution
@@ -106,6 +106,29 @@ def _screening_response(screening: MovementScreening) -> MovementScreeningRespon
         clinician_review=screening.clinician_review or {}, physio_review=screening.physio_review or {},
         report_summary=screening.report_summary, report_generated_at=screening.report_generated_at, created_at=screening.created_at,
     )
+
+
+async def _run_analysis_background(screening_id: uuid.UUID) -> None:
+    db = SessionLocal()
+    try:
+        screening = db.get(MovementScreening, screening_id)
+        if not screening or not screening.video_url:
+            return
+        try:
+            result = await run_movement_analysis(screening)
+        except Exception as exc:
+            screening.status = "FAILED"
+            screening.ai_result = {
+                "status": "FAILED",
+                "summary": "AI analysis failed. Please review the video and try again.",
+                "error": str(exc)[:500],
+            }
+        else:
+            screening.ai_result = result
+            screening.status = "RETAKE_REQUIRED" if result.get("status") == "RETAKE_REQUIRED" else "AWAITING_CLINICIAN_REVIEW"
+        db.commit()
+    finally:
+        db.close()
 
 
 def _sanitize_html(value: str) -> str:
@@ -229,7 +252,12 @@ async def upload_video(screening_id: uuid.UUID, video: UploadFile = File(...), u
 
 
 @router.post("/screenings/{screening_id}/analyze", response_model=MovementScreeningResponse, dependencies=[Depends(verify_csrf)])
-async def analyze(screening_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)) -> MovementScreeningResponse:
+async def analyze(
+    screening_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> MovementScreeningResponse:
     if user.role not in CLINICAL_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Clinical staff start AI analysis")
     screening = db.get(MovementScreening, screening_id)
@@ -237,16 +265,7 @@ async def analyze(screening_id: uuid.UUID, user: User = Depends(current_user), d
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Uploaded screening video not found")
     screening.status = "PROCESSING_POSE"
     db.commit(); db.refresh(screening)
-    try:
-        result = await run_movement_analysis(screening)
-    except Exception as exc:
-        screening.status = "FAILED"
-        screening.ai_result = {"status": "FAILED", "summary": "AI analysis failed. Please review the video and try again.", "error": str(exc)[:500]}
-        db.commit(); db.refresh(screening)
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "AI movement analysis failed") from exc
-    screening.ai_result = result
-    screening.status = "RETAKE_REQUIRED" if result.get("status") == "RETAKE_REQUIRED" else "AWAITING_CLINICIAN_REVIEW"
-    db.commit(); db.refresh(screening)
+    background_tasks.add_task(_run_analysis_background, screening.id)
     return _screening_response(screening)
 
 
