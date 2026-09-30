@@ -80,7 +80,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        for origin in (self.frontend_url, "https://safesport.ayothealthsolutions.ke", "http://localhost:3000"):
+            if origin and origin not in origins:
+                origins.append(origin)
+        return origins
 
     @property
     def secure_cookies(self) -> bool:
